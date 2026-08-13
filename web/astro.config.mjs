@@ -12,4 +12,16 @@ export default defineConfig({
   site: process.env.PUBLIC_SITE_URL || 'http://localhost:4321',
   server: { host: true, port: 4321 },
   build: { inlineStylesheets: 'auto' },
+
+  // ปิด CSRF check ของ Astro แล้วเช็คเองใน src/lib/csrf.ts
+  //
+  // ของ Astro เทียบ header Origin กับ origin ที่ได้จาก request.url
+  // แต่ adapter node สร้าง request.url โดย "ตัด port ทิ้ง" (ได้ http://localhost
+  // ทั้งที่ Host คือ localhost:4321) และหลัง reverse proxy ของ Railway ก็ยัง
+  // เห็น protocol เป็น http ทั้งที่ผู้ใช้เข้ามาทาง https
+  // ผลคือฟอร์มทุกอันโดน 403 แม้เป็น same-origin จริงๆ
+  //
+  // ตัวที่เขียนเองเทียบ Origin กับ Host ของ request เดียวกัน จึงไม่ขึ้นกับ
+  // config หรือพฤติกรรมของ proxy เลย
+  security: { checkOrigin: false },
 });

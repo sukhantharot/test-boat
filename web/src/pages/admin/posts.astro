@@ -1,0 +1,220 @@
+---
+import Admin from '../../layouts/Admin.astro';
+import {
+  callApi,
+  callApiPaged,
+  requireAdmin,
+  pageHref,
+  fmtInt,
+  fmtDate,
+} from '../../lib/backend';
+import { rejectCrossSite } from '../../lib/csrf';
+
+export const prerender = false;
+
+const guard = await requireAdmin(Astro.request);
+if (guard instanceof Response) return guard;
+const admin = guard;
+
+type Row = {
+  id: number;
+  slug: string;
+  title: string;
+  status: string;
+  view_count: number;
+  contact_count: number;
+  created_at: string;
+  user_id: number;
+  author: string;
+  is_pro: boolean;
+};
+
+if (Astro.request.method === 'POST') {
+  const blocked = rejectCrossSite(Astro.request);
+  if (blocked) return blocked;
+
+  const form = await Astro.request.formData();
+  const res = await callApi(Astro.request, `/api/v1/admin/posts/${form.get('id')}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: String(form.get('status') ?? '') }),
+  });
+
+  const back = String(form.get('back') ?? '/admin/posts');
+  const sep = back.includes('?') ? '&' : '?';
+  const msg = res.ok ? 'บันทึกแล้ว' : (res.error ?? 'ทำรายการไม่สำเร็จ');
+  return Astro.redirect(`${back}${sep}msg=${encodeURIComponent(msg)}&ok=${res.ok ? 1 : 0}`, 303);
+}
+
+const q = Astro.url.searchParams.get('q') ?? '';
+const status = Astro.url.searchParams.get('status') ?? '';
+const limit = 50;
+const offset = Math.max(0, Number(Astro.url.searchParams.get('offset') ?? 0) || 0);
+
+const res = await callApiPaged<Row>(
+  Astro.request,
+  `/api/v1/admin/posts?limit=${limit}&offset=${offset}` +
+    `&q=${encodeURIComponent(q)}&status=${encodeURIComponent(status)}`,
+);
+const rows = res.data ?? [];
+const { total } = res.meta;
+
+const statusLabel: Record<string, string> = {
+  active: 'แสดงอยู่',
+  hidden: 'ซ่อน',
+  draft: 'ฉบับร่าง',
+  banned: 'ถูกแบน',
+};
+
+const filters = [
+  { value: '', label: 'ทั้งหมด' },
+  { value: 'active', label: 'แสดงอยู่' },
+  { value: 'hidden', label: 'ซ่อน' },
+  { value: 'banned', label: 'ถูกแบน' },
+];
+
+const msg = Astro.url.searchParams.get('msg');
+const msgOk = Astro.url.searchParams.get('ok') !== '0';
+const back = Astro.url.pathname + Astro.url.search;
+---
+
+<Admin title="ประกาศ" admin={admin} current="posts">
+  <header>
+    <h1>ประกาศ</h1>
+    <p>ทั้งหมด {fmtInt(total)} รายการ{status ? ` (กรอง: ${statusLabel[status] ?? status})` : ''}</p>
+  </header>
+
+  {msg && <p class={`flash ${msgOk ? '' : 'bad'}`}>{msg}</p>}
+
+  <form class="toolbar" method="get">
+    <input type="search" name="q" value={q} placeholder="ค้นหาชื่อประกาศหรือชื่อผู้ลง" />
+    <button class="btn btn-outline btn-sm" type="submit">ค้นหา</button>
+    <span class="filter-chips">
+      {filters.map((f) => (
+        <a
+          class="chip"
+          href={pageHref(Astro.url, { status: f.value || null, offset: null, msg: null, ok: null })}
+          aria-current={status === f.value ? 'true' : 'false'}
+        >
+          {f.label}
+        </a>
+      ))}
+    </span>
+  </form>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ประกาศ</th>
+          <th>ผู้ลงประกาศ</th>
+          <th>สถานะ</th>
+          <th class="num">วิว</th>
+          <th class="num">ติดต่อ</th>
+          <th>ลงเมื่อ</th>
+          <th>จัดการ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 && (
+          <tr>
+            <td colspan="7" class="empty-row">ไม่พบประกาศที่ตรงกับเงื่อนไข</td>
+          </tr>
+        )}
+
+        {rows.map((p) => (
+          <tr>
+            <td class="wrap">
+              <a href={`/services/${encodeURI(p.slug)}`} target="_blank" rel="noopener">
+                {p.title}
+              </a>
+            </td>
+            <td>
+              {p.author}
+              {p.is_pro && <span class="pill pro">Pro</span>}
+            </td>
+            <td>
+              {p.status === 'active' && <span class="pill ok">แสดงอยู่</span>}
+              {p.status === 'hidden' && <span class="pill">ซ่อน</span>}
+              {p.status === 'draft' && <span class="pill">ฉบับร่าง</span>}
+              {p.status === 'banned' && <span class="pill warn">ถูกแบน</span>}
+            </td>
+            <td class="num">{fmtInt(p.view_count)}</td>
+            <td class="num">{fmtInt(p.contact_count)}</td>
+            <td class="muted">{fmtDate(p.created_at)}</td>
+            <td>
+              <div class="row-actions">
+                {p.status !== 'active' && (
+                  <form method="post">
+                    <input type="hidden" name="id" value={p.id} />
+                    <input type="hidden" name="status" value="active" />
+                    <input type="hidden" name="back" value={back} />
+                    <button class="btn btn-outline btn-sm" type="submit">แสดง</button>
+                  </form>
+                )}
+                {p.status !== 'hidden' && (
+                  <form method="post">
+                    <input type="hidden" name="id" value={p.id} />
+                    <input type="hidden" name="status" value="hidden" />
+                    <input type="hidden" name="back" value={back} />
+                    <button class="btn btn-outline btn-sm" type="submit">ซ่อน</button>
+                  </form>
+                )}
+                {p.status !== 'banned' && (
+                  <form method="post" onsubmit="return confirm('แบนประกาศนี้?')">
+                    <input type="hidden" name="id" value={p.id} />
+                    <input type="hidden" name="status" value="banned" />
+                    <input type="hidden" name="back" value={back} />
+                    <button class="btn btn-outline btn-sm danger" type="submit">แบน</button>
+                  </form>
+                )}
+              </div>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <nav class="pager">
+    <span>
+      แสดง {fmtInt(Math.min(offset + 1, total))}–{fmtInt(Math.min(offset + limit, total))} จาก{' '}
+      {fmtInt(total)}
+    </span>
+    <span class="links">
+      <a
+        class="btn btn-outline btn-sm"
+        href={pageHref(Astro.url, { offset: Math.max(0, offset - limit) || null, msg: null, ok: null })}
+        aria-disabled={offset === 0}>ก่อนหน้า</a
+      >
+      <a
+        class="btn btn-outline btn-sm"
+        href={pageHref(Astro.url, { offset: offset + limit, msg: null, ok: null })}
+        aria-disabled={offset + limit >= total}>ถัดไป</a
+      >
+    </span>
+  </nav>
+</Admin>
+
+<style>
+  .row-actions {
+    display: flex;
+    gap: var(--sp-2);
+  }
+
+  .filter-chips {
+    display: inline-flex;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
+    margin-inline-start: var(--sp-2);
+  }
+
+  /* แบนคือการกระทำที่ย้อนยากที่สุดในหน้านี้ ต้องดูต่างจากปุ่มอื่น */
+  .danger {
+    color: var(--warn-text);
+    border-color: var(--warn-border);
+  }
+
+  td .pill.pro {
+    margin-inline-start: var(--sp-2);
+  }
+</style>

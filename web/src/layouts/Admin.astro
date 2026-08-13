@@ -1,0 +1,61 @@
+---
+import '../styles/global.css';
+import '../styles/admin.css';
+import type { AdminInfo } from '../lib/backend';
+
+interface Props {
+  title: string;
+  admin: AdminInfo;
+  current: 'dashboard' | 'users' | 'posts' | 'payments';
+}
+
+const { title, admin, current } = Astro.props;
+
+const nav = [
+  { key: 'dashboard', href: '/admin', label: 'ภาพรวม' },
+  { key: 'users', href: '/admin/users', label: 'ผู้ใช้' },
+  { key: 'posts', href: '/admin/posts', label: 'ประกาศ' },
+  { key: 'payments', href: '/admin/payments', label: 'การชำระเงิน' },
+] as const;
+---
+
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} · หลังบ้าน</title>
+    {/* หลังบ้านห้ามหลุดเข้า Google เด็ดขาด (robots.txt disallow ไว้อีกชั้นแล้ว) */}
+    <meta name="robots" content="noindex,nofollow" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0c0e13" media="(prefers-color-scheme: dark)" />
+  </head>
+  <body>
+    <div class="admin-shell">
+      <header class="admin-bar">
+        <div class="admin-bar-inner">
+          <a class="admin-brand" href="/admin">Boat <span class="tag">ADMIN</span></a>
+
+          <nav class="admin-nav">
+            {nav.map((n) => (
+              <a href={n.href} aria-current={n.key === current ? 'page' : undefined}>
+                {n.label}
+              </a>
+            ))}
+          </nav>
+
+          <div class="admin-who">
+            <span>{admin.name}</span>
+            <a class="btn btn-outline btn-sm" href="/" target="_blank" rel="noopener">ดูเว็บจริง</a>
+            <form method="post" action="/admin/logout">
+              <button class="btn btn-outline btn-sm" type="submit">ออกจากระบบ</button>
+            </form>
+          </div>
+        </div>
+      </header>
+
+      <main class="admin-main">
+        <slot />
+      </main>
+    </div>
+  </body>
+</html>

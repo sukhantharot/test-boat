@@ -1,0 +1,324 @@
+/* ══════════════════════════════════════════════════════════════════════
+   สไตล์เฉพาะหลังบ้าน — ใช้ token ชุดเดียวกับหน้าเว็บจริง (global.css)
+   ห้าม hardcode สี ไม่งั้นหลังบ้านจะเป็นส่วนเดียวที่พังตอนโหมดมืด
+   ══════════════════════════════════════════════════════════════════════ */
+
+.admin-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 100dvh;
+}
+
+.admin-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.admin-bar-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.admin-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 700;
+  color: var(--text);
+  text-decoration: none;
+  letter-spacing: -0.02em;
+}
+
+.admin-brand .tag {
+  padding: 0.0625rem 0.375rem;
+  border-radius: var(--r-sm);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+}
+
+.admin-nav {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+  margin-inline-start: var(--sp-3);
+}
+
+.admin-nav a {
+  padding: 0.375rem var(--sp-3);
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.admin-nav a:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.admin-nav a[aria-current='page'] {
+  background: var(--brand-soft);
+  color: var(--brand-text);
+}
+
+.admin-who {
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.admin-main {
+  padding: var(--sp-5) var(--sp-4) var(--sp-7);
+}
+
+.admin-main > header {
+  margin-bottom: var(--sp-5);
+}
+
+.admin-main h1 {
+  font-size: var(--step-3);
+}
+
+.admin-main header p {
+  margin-top: var(--sp-1);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+/* ── การ์ดตัวเลข ─────────────────────────────────────────────────────── */
+
+.stats {
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  margin-bottom: var(--sp-6);
+}
+
+.stat {
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-elevated);
+}
+
+.stat dt {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+
+.stat dd {
+  margin-top: var(--sp-1);
+  font-size: var(--step-3);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat .delta {
+  display: block;
+  margin-top: var(--sp-1);
+  color: var(--text-faint);
+  font-size: var(--step--1);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.stat.accent {
+  border-color: var(--pro-border);
+  background: var(--pro-soft);
+}
+
+.stat.accent dd {
+  color: var(--pro);
+}
+
+/* ── ตาราง ───────────────────────────────────────────────────────────── */
+
+/* ตารางกว้างกว่าจอต้องเลื่อนในกล่องตัวเอง ไม่ใช่ดันทั้งหน้าให้เลื่อนแนวนอน */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-elevated);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+  white-space: nowrap;
+}
+
+th,
+td {
+  padding: var(--sp-3);
+  text-align: start;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+tbody tr:hover {
+  background: var(--bg-subtle);
+}
+
+td.num {
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+td.wrap {
+  white-space: normal;
+  min-width: 16rem;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.mono {
+  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, monospace;
+  font-size: 0.8125em;
+}
+
+/* ── ป้ายสถานะ ───────────────────────────────────────────────────────── */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.0625rem 0.4375rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-pill);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pill.ok {
+  border-color: var(--brand-border);
+  background: var(--brand-soft);
+  color: var(--brand-text);
+}
+
+.pill.warn {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.pill.pro {
+  border-color: var(--pro-border);
+  background: var(--pro-soft);
+  color: var(--pro);
+}
+
+/* ── ฟอร์ม / แถบเครื่องมือ ───────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+  margin-bottom: var(--sp-4);
+}
+
+input[type='text'],
+input[type='search'],
+input[type='email'],
+input[type='password'],
+input[type='number'],
+select,
+textarea {
+  padding: 0.5rem var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  font-size: var(--step--1);
+}
+
+input::placeholder {
+  color: var(--text-faint);
+}
+
+.inline-form {
+  display: inline-flex;
+  gap: var(--sp-1);
+  align-items: center;
+}
+
+.inline-form input[type='number'] {
+  width: 4.5rem;
+}
+
+/* ── ข้อความแจ้งผล ───────────────────────────────────────────────────── */
+
+.flash {
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+  border: 1px solid var(--brand-border);
+  border-radius: var(--r-md);
+  background: var(--brand-soft);
+  color: var(--brand-text);
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+
+.flash.bad {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+/* ── แบ่งหน้า ────────────────────────────────────────────────────────── */
+
+.pager {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--sp-4);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.pager .links {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.pager a[aria-disabled='true'] {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.empty-row {
+  padding: var(--sp-7) var(--sp-4);
+  text-align: center;
+  color: var(--text-muted);
+}

@@ -1,6 +1,11 @@
 ---
 // แถบบนสุด — ติดหัวจอไว้เพราะปุ่ม "ลงประกาศฟรี" คือทางเข้าของฝั่งซัพพลาย
 // ลิงก์ nav ใช้ path เต็ม (/#feed) ไม่ใช่ #feed เพื่อให้กดจากหน้าโพสก็เด้งกลับหน้าแรกถูก
+import { getMe } from '../lib/session';
+
+// getMe() ข้ามการยิง API ให้เองถ้าไม่มี cookie session อยู่
+// ผู้เข้าชมส่วนใหญ่ (และ Googlebot) ไม่ได้ login เลยไม่มี request เสียเปล่า
+const me = await getMe(Astro.request.headers.get('cookie'));
 ---
 
 <header class="site-header">
@@ -17,8 +22,24 @@
     </nav>
 
     <div class="actions">
-      <a class="login" href="/login">เข้าสู่ระบบ</a>
-      <a class="btn btn-primary btn-sm" href="/post/new">ลงประกาศฟรี</a>
+      {me ? (
+        <>
+          <span class="who" title={me.email}>
+            {me.display_name}
+            {me.is_pro && <span class="badge">Pro</span>}
+          </span>
+          {/* logout ต้องเป็น POST — ดูเหตุผลใน src/pages/logout.astro */}
+          <form class="logout" method="post" action="/logout">
+            <button type="submit">ออกจากระบบ</button>
+          </form>
+          <a class="btn btn-primary btn-sm" href="/post/new">ลงประกาศ</a>
+        </>
+      ) : (
+        <>
+          <a class="login" href="/login">เข้าสู่ระบบ</a>
+          <a class="btn btn-primary btn-sm" href="/post/new">ลงประกาศฟรี</a>
+        </>
+      )}
     </div>
   </div>
 </header>
@@ -111,9 +132,44 @@
     color: var(--text);
   }
 
+  /* ชื่อผู้ใช้ยาวได้ ต้องตัดด้วย ellipsis ไม่ให้ดันปุ่มลงประกาศตกจอบนมือถือ */
+  .who {
+    display: none;
+    align-items: center;
+    gap: var(--sp-2);
+    max-width: 11rem;
+    font-size: var(--step--1);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .logout {
+    display: none;
+  }
+
+  /* ปุ่มใน form แต่ต้องดูเป็นลิงก์ให้เข้าชุดกับ nav ที่เหลือ */
+  .logout button {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-muted);
+    font-size: var(--step--1);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .logout button:hover {
+    color: var(--text);
+    text-decoration: underline;
+  }
+
   @media (min-width: 48rem) {
     .nav,
-    .login {
+    .login,
+    .who,
+    .logout {
       display: flex;
     }
   }

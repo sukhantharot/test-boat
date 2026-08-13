@@ -1,0 +1,146 @@
+---
+import Admin from '../../layouts/Admin.astro';
+import { callApiPaged, requireAdmin, pageHref, fmtInt, fmtBaht, fmtDateTime } from '../../lib/backend';
+
+export const prerender = false;
+
+const guard = await requireAdmin(Astro.request);
+if (guard instanceof Response) return guard;
+const admin = guard;
+
+type Row = {
+  id: number;
+  amount_satang: number;
+  method: string;
+  provider: string | null;
+  status: string;
+  days_granted: number;
+  paid_at: string | null;
+  created_at: string;
+  slip_url: string | null;
+  user_id: number;
+  author: string;
+};
+
+const limit = 50;
+const offset = Math.max(0, Number(Astro.url.searchParams.get('offset') ?? 0) || 0);
+
+const res = await callApiPaged<Row>(
+  Astro.request,
+  `/api/v1/admin/payments?limit=${limit}&offset=${offset}`,
+);
+const rows = res.data ?? [];
+const { total } = res.meta;
+
+const methodLabel: Record<string, string> = {
+  promptpay: 'PromptPay',
+  card: 'บัตรเครดิต',
+  manual_slip: 'โอน + สลิป',
+  comp: 'แถมโดยแอดมิน',
+};
+
+const statusLabel: Record<string, string> = {
+  paid: 'ชำระแล้ว',
+  pending: 'รอชำระ',
+  failed: 'ไม่สำเร็จ',
+  refunded: 'คืนเงินแล้ว',
+};
+
+// รายได้จริงต้องไม่นับ 'comp' (การแถมฟรี) ไม่งั้นตัวเลขจะหลอกตัวเอง
+const realRevenue = rows
+  .filter((p) => p.status === 'paid' && p.method !== 'comp')
+  .reduce((sum, p) => sum + p.amount_satang, 0);
+const compCount = rows.filter((p) => p.method === 'comp').length;
+---
+
+<Admin title="การชำระเงิน" admin={admin} current="payments">
+  <header>
+    <h1>การชำระเงิน</h1>
+    <p>
+      ทั้งหมด {fmtInt(total)} รายการ · ในหน้านี้เป็นรายได้จริง {fmtBaht(realRevenue)}
+      {compCount > 0 && ` (ไม่นับรายการแถมฟรี ${compCount} รายการ)`}
+    </p>
+  </header>
+
+  {total === 0 && (
+    <p class="flash">
+      ยังไม่มีรายการชำระเงิน — ระบบรับเงิน (PromptPay QR + webhook) ยังไม่ได้ทำ
+      รายการที่เห็นตอนนี้จะมีเฉพาะการแถมวัน Pro โดยแอดมินเท่านั้น
+    </p>
+  )}
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>วันที่</th>
+          <th>ผู้ใช้</th>
+          <th>ช่องทาง</th>
+          <th class="num">จำนวนเงิน</th>
+          <th class="num">ได้วัน</th>
+          <th>สถานะ</th>
+          <th>สลิป</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 && (
+          <tr>
+            <td colspan="7" class="empty-row">ยังไม่มีรายการ</td>
+          </tr>
+        )}
+
+        {rows.map((p) => (
+          <tr>
+            <td class="muted">{fmtDateTime(p.paid_at ?? p.created_at)}</td>
+            <td>{p.author}</td>
+            <td>
+              {methodLabel[p.method] ?? p.method}
+              {p.method === 'comp' && <span class="pill">ฟรี</span>}
+            </td>
+            <td class="num">{p.method === 'comp' ? '—' : fmtBaht(p.amount_satang)}</td>
+            <td class="num">{p.days_granted}</td>
+            <td>
+              {p.status === 'paid' ? (
+                <span class="pill ok">{statusLabel[p.status]}</span>
+              ) : (
+                <span class="pill warn">{statusLabel[p.status] ?? p.status}</span>
+              )}
+            </td>
+            <td>
+              {p.slip_url ? (
+                <a href={p.slip_url} target="_blank" rel="noopener">ดูสลิป</a>
+              ) : (
+                <span class="muted">—</span>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <nav class="pager">
+    <span>
+      แสดง {fmtInt(Math.min(offset + 1, total))}–{fmtInt(Math.min(offset + limit, total))} จาก{' '}
+      {fmtInt(total)}
+    </span>
+    <span class="links">
+      <a
+        class="btn btn-outline btn-sm"
+        href={pageHref(Astro.url, { offset: Math.max(0, offset - limit) || null })}
+        aria-disabled={offset === 0}>ก่อนหน้า</a
+      >
+      <a
+        class="btn btn-outline btn-sm"
+        href={pageHref(Astro.url, { offset: offset + limit })}
+        aria-disabled={offset + limit >= total}>ถัดไป</a
+      >
+    </span>
+  </nav>
+</Admin>
+
+<style>
+  td .pill {
+    margin-inline-start: var(--sp-2);
+  }
+</style>

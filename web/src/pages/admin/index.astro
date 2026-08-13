@@ -1,0 +1,188 @@
+---
+import Admin from '../../layouts/Admin.astro';
+import { callApi, requireAdmin, fmtInt, fmtBaht } from '../../lib/backend';
+import { rejectCrossSite } from '../../lib/csrf';
+
+export const prerender = false;
+
+const guard = await requireAdmin(Astro.request);
+if (guard instanceof Response) return guard;
+const admin = guard;
+
+type Stats = {
+  users: number;
+  pro_users: number;
+  new_users_7d: number;
+  posts: number;
+  active_posts: number;
+  new_posts_7d: number;
+  leads: number;
+  leads_7d: number;
+  revenue_satang: number;
+  revenue_satang_30d: number;
+  pro_conversion_pct: number;
+};
+
+// ── ปุ่มข้อมูลตัวอย่าง (PRG: POST แล้ว redirect กัน refresh ซ้ำแล้วยิงซ้ำ) ──
+if (Astro.request.method === 'POST') {
+  const blocked = rejectCrossSite(Astro.request);
+  if (blocked) return blocked;
+
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+
+  let res;
+  if (action === 'seed') {
+    const n = Number(form.get('n') ?? 1000);
+    res = await callApi(Astro.request, '/api/v1/admin/demo', {
+      method: 'POST',
+      body: JSON.stringify({ n }),
+    });
+  } else if (action === 'purge') {
+    res = await callApi(Astro.request, '/api/v1/admin/demo', { method: 'DELETE' });
+  }
+
+  if (res) {
+    const msg = res.ok
+      ? action === 'seed'
+        ? 'สร้างข้อมูลตัวอย่างแล้ว'
+        : 'ลบข้อมูลตัวอย่างแล้ว'
+      : (res.error ?? 'ทำรายการไม่สำเร็จ');
+    return Astro.redirect(`/admin?msg=${encodeURIComponent(msg)}&ok=${res.ok ? 1 : 0}`, 303);
+  }
+}
+
+const stats = (await callApi<Stats>(Astro.request, '/api/v1/admin/stats')).data;
+
+const msg = Astro.url.searchParams.get('msg');
+const msgOk = Astro.url.searchParams.get('ok') !== '0';
+---
+
+<Admin title="ภาพรวม" admin={admin} current="dashboard">
+  <header>
+    <h1>ภาพรวมระบบ</h1>
+    <p>ตัวเลขสดจากฐานข้อมูล ณ ตอนที่เปิดหน้านี้</p>
+  </header>
+
+  {msg && <p class={`flash ${msgOk ? '' : 'bad'}`}>{msg}</p>}
+
+  {!stats && <p class="flash bad">ดึงข้อมูลสถิติไม่ได้ ลองรีเฟรชอีกครั้ง</p>}
+
+  {stats && (
+    <>
+      <dl class="stats">
+        <div class="stat">
+          <dt>ผู้ใช้ทั้งหมด</dt>
+          <dd>{fmtInt(stats.users)}</dd>
+          <span class="delta">+{fmtInt(stats.new_users_7d)} ใน 7 วัน</span>
+        </div>
+
+        <div class="stat accent">
+          <dt>สมาชิก Pro</dt>
+          <dd>{fmtInt(stats.pro_users)}</dd>
+          <span class="delta">
+            คิดเป็น {stats.pro_conversion_pct.toFixed(1)}% ของผู้ใช้ทั้งหมด
+          </span>
+        </div>
+
+        <div class="stat">
+          <dt>ประกาศที่แสดงอยู่</dt>
+          <dd>{fmtInt(stats.active_posts)}</dd>
+          <span class="delta">ทั้งหมด {fmtInt(stats.posts)} · +{fmtInt(stats.new_posts_7d)} ใน 7 วัน</span>
+        </div>
+
+        <div class="stat">
+          <dt>ยอดกดติดต่อ</dt>
+          <dd>{fmtInt(stats.leads)}</dd>
+          <span class="delta">+{fmtInt(stats.leads_7d)} ใน 7 วัน</span>
+        </div>
+
+        <div class="stat">
+          <dt>รายได้ 30 วัน</dt>
+          <dd>{fmtBaht(stats.revenue_satang_30d)}</dd>
+          <span class="delta">สะสมทั้งหมด {fmtBaht(stats.revenue_satang)}</span>
+        </div>
+      </dl>
+
+      {/* ตัวเลขนี้คือสิ่งที่ตัดสินว่าเว็บเวิร์กหรือไม่:
+          ถ้ามีคนกดติดต่อเยอะแต่ไม่มีใครยอมจ่าย แปลว่าราคาหรือแพ็กเกจผิด
+          ถ้าไม่มีคนกดติดต่อเลย แปลว่าปัญหาอยู่ที่ demand ไม่ใช่ที่แพ็กเกจ */}
+      <section class="callout">
+        <h2>ตัวเลขที่ควรดูทุกสัปดาห์</h2>
+        <p>
+          <strong>{fmtInt(stats.leads_7d)}</strong> ครั้งที่มีคนกดติดต่อใน 7 วันที่ผ่านมา
+          จากประกาศที่แสดงอยู่ <strong>{fmtInt(stats.active_posts)}</strong> รายการ
+          {stats.active_posts > 0 && (
+            <> — เฉลี่ย {(stats.leads_7d / stats.active_posts).toFixed(2)} ครั้งต่อประกาศ</>
+          )}
+        </p>
+        <p class="muted">
+          นี่คือหลักฐานที่ใช้ขายค่าต่ออายุ 300฿ ถ้าตัวเลขนี้ต่ำ อย่าเพิ่งเริ่มเก็บเงิน
+        </p>
+      </section>
+    </>
+  )}
+
+  <section class="demo-box">
+    <h2>ข้อมูลตัวอย่างสำหรับสาธิต</h2>
+    <p class="muted">
+      สร้างประกาศสมมติไว้โชว์ลูกค้า ทุกรายการติดธง <code>is_demo</code>
+      จึงลบทิ้งทีเดียวได้โดยไม่แตะประกาศจริง และไม่ถูกใส่ใน sitemap
+      <br />
+      ไม่มีเบอร์โทรในข้อมูลชุดนี้โดยตั้งใจ — เบอร์มือถือที่สุ่มขึ้นมามีเจ้าของจริง
+    </p>
+
+    <div class="demo-actions">
+      <form method="post" class="inline-form">
+        <input type="hidden" name="action" value="seed" />
+        <label for="n">จำนวน</label>
+        <input id="n" type="number" name="n" value="1000" min="1" max="20000" />
+        <button class="btn btn-primary btn-sm" type="submit">สร้างข้อมูลตัวอย่าง</button>
+      </form>
+
+      <form method="post" onsubmit="return confirm('ลบข้อมูลตัวอย่างทั้งหมด?')">
+        <input type="hidden" name="action" value="purge" />
+        <button class="btn btn-outline btn-sm" type="submit">ลบข้อมูลตัวอย่างทั้งหมด</button>
+      </form>
+    </div>
+  </section>
+</Admin>
+
+<style>
+  .callout,
+  .demo-box {
+    padding: var(--sp-5);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-elevated);
+    margin-bottom: var(--sp-5);
+  }
+
+  .callout h2,
+  .demo-box h2 {
+    font-size: var(--step-1);
+    margin-bottom: var(--sp-2);
+  }
+
+  .callout p + p,
+  .demo-box p {
+    margin-top: var(--sp-2);
+    font-size: var(--step--1);
+  }
+
+  .demo-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    align-items: center;
+    margin-top: var(--sp-4);
+  }
+
+  code {
+    padding: 0.0625rem 0.25rem;
+    border-radius: var(--r-sm);
+    background: var(--bg-inset);
+    font-family: ui-monospace, monospace;
+    font-size: 0.875em;
+  }
+</style>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"boat/api/internal/auth"
+	"boat/api/internal/demo"
 )
 
 // หลังบ้าน — แยกจากฝั่ง user โดยสิ้นเชิง: คนละตาราง คนละ secret คนละ cookie
@@ -161,6 +163,23 @@ func (s *Server) adminListUsers(w http.ResponseWriter, r *http.Request) {
 			"created_at": createdAt, "active_posts": activePosts, "total_leads": leads,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// ดู comment เรื่อง count(*) OVER () ใน listPosts (posts_handlers.go)
+	// offset เลยข้อมูล -> ไม่มีแถวให้นับ -> total ค้าง 0 -> pager หลังบ้านหาย
+	if len(out) == 0 && offset > 0 {
+		if err := s.pool.QueryRow(r.Context(), `
+			SELECT count(*) FROM users u
+			WHERE ($1 = '' OR u.display_name ILIKE '%'||$1||'%' OR u.email::text ILIKE '%'||$1||'%')`,
+			q).Scan(&total); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data": out, "meta": map[string]any{"total": total, "limit": limit, "offset": offset},
 	})
@@ -273,6 +292,22 @@ func (s *Server) adminListPosts(w http.ResponseWriter, r *http.Request) {
 			"user_id": uid, "author": author, "is_pro": isPro,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if len(out) == 0 && offset > 0 {
+		if err := s.pool.QueryRow(r.Context(), `
+			SELECT count(*) FROM posts p JOIN users u ON u.id = p.user_id
+			WHERE ($1 = '' OR p.title ILIKE '%'||$1||'%' OR u.display_name ILIKE '%'||$1||'%')
+			  AND ($2 = '' OR p.status = $2)`,
+			q, status).Scan(&total); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data": out, "meta": map[string]any{"total": total, "limit": limit, "offset": offset},
 	})
@@ -354,8 +389,72 @@ func (s *Server) adminListPayments(w http.ResponseWriter, r *http.Request) {
 			"user_id": uid, "author": author,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if len(out) == 0 && offset > 0 {
+		// ต้อง JOIN users เหมือน query ข้างบนเป๊ะๆ ไม่งั้นตัวเลขสองที่จะไม่ตรงกัน
+		if err := s.pool.QueryRow(r.Context(),
+			`SELECT count(*) FROM payments p JOIN users u ON u.id = p.user_id`).Scan(&total); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data": out, "meta": map[string]any{"total": total, "limit": limit, "offset": offset},
+	})
+}
+
+// ── ข้อมูลตัวอย่างสำหรับสาธิต ────────────────────────────────────────────
+//
+// ทำเป็น endpoint เพราะบน Railway ต่อ Postgres จากเครื่องตัวเองไม่ได้
+// (ไม่ได้เปิด public access) การรันผ่าน api จึงเป็นทางเดียวที่ไม่ต้องเปิด DB ออกเน็ต
+
+func (s *Server) adminSeedDemo(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		N int `json:"n"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.N <= 0 {
+		req.N = 1000
+	}
+
+	// สร้างหลักพันแถวใช้เวลาหลายวินาที ต้องมี ctx ของตัวเองไม่ให้ถูกตัดกลางคัน
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Minute)
+	defer cancel()
+
+	res, err := demo.Seed(ctx, s.pool, req.N, time.Now().UnixNano())
+	if err != nil {
+		slog.Error("seed demo", "err", err)
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.audit(ctx, adminID(r), "demo.seed", "system", 0,
+		map[string]any{"posts": res.Posts, "users": res.Users})
+
+	writeJSON(w, http.StatusCreated, map[string]any{"data": res})
+}
+
+func (s *Server) adminPurgeDemo(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Minute)
+	defer cancel()
+
+	deleted, err := demo.Purge(ctx, s.pool)
+	if err != nil {
+		slog.Error("purge demo", "err", err)
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.audit(ctx, adminID(r), "demo.purge", "system", 0,
+		map[string]any{"users_deleted": deleted})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{"users_deleted": deleted},
 	})
 }
 

@@ -132,6 +132,30 @@ func (s *Server) listPosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// count(*) OVER () คิดจาก "แถวที่ query คืนมา" -> ถ้า offset เลยข้อมูลไปแล้ว
+	// จะไม่มีแถวให้นับเลย total จึงค้างเป็น 0 ทั้งที่ของจริงมีเป็นพันรายการ
+	//
+	// ผลตอนนั้น: หน้าเว็บคิดว่า "ยังไม่มีประกาศในระบบ" แล้ว totalPages ยุบเหลือ 1
+	// ทำให้ pager หายไปด้วย = ผู้ใช้ตีบตันกลับหน้าแรกไม่ได้
+	// เข้าถึงได้จริงจาก bookmark เก่า หรือลิงก์ ?page= ที่ค้างใน Google
+	//
+	// นับซ้ำอีก query เฉพาะเคสนี้ (หน้าว่าง + offset > 0) ไม่แตะ hot path
+	// offset = 0 แล้วไม่มีแถว แปลว่า total = 0 จริง ไม่ต้องนับ
+	if withTotal && len(out) == 0 && offset > 0 {
+		countSQL := fmt.Sprintf(`
+			SELECT count(*)
+			FROM posts p
+			JOIN users u ON u.id = p.user_id
+			LEFT JOIN categories c ON c.id = p.category_id
+			WHERE %s`, strings.Join(conds, " AND "))
+
+		// args 2 ตัวท้ายคือ limit/offset ของ query ข้างบน countSQL ไม่ได้ใช้
+		if err := s.pool.QueryRow(r.Context(), countSQL, args[:len(args)-2]...).Scan(&total); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data": out,
 		"meta": map[string]any{"total": total, "limit": limit, "offset": offset},

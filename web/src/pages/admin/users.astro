@@ -1,0 +1,209 @@
+---
+import Admin from '../../layouts/Admin.astro';
+import {
+  callApi,
+  callApiPaged,
+  requireAdmin,
+  pageHref,
+  fmtInt,
+  fmtDate,
+  daysLeft,
+} from '../../lib/backend';
+import { rejectCrossSite } from '../../lib/csrf';
+
+export const prerender = false;
+
+const guard = await requireAdmin(Astro.request);
+if (guard instanceof Response) return guard;
+const admin = guard;
+
+type Row = {
+  id: number;
+  email: string;
+  display_name: string;
+  phone: string | null;
+  provider: string;
+  status: string;
+  pro_until: string | null;
+  is_pro: boolean;
+  created_at: string;
+  active_posts: number;
+  total_leads: number;
+};
+
+// ── การกระทำ (PRG) ───────────────────────────────────────────────────────
+if (Astro.request.method === 'POST') {
+  const blocked = rejectCrossSite(Astro.request);
+  if (blocked) return blocked;
+
+  const form = await Astro.request.formData();
+  const id = String(form.get('id') ?? '');
+  const action = String(form.get('action') ?? '');
+
+  const body: Record<string, unknown> = {};
+  if (action === 'suspend') body.status = 'suspended';
+  else if (action === 'activate') body.status = 'active';
+  else if (action === 'grant') body.grant_pro = Number(form.get('days') ?? 0);
+
+  const res = await callApi(Astro.request, `/api/v1/admin/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+
+  const back = String(form.get('back') ?? '/admin/users');
+  const sep = back.includes('?') ? '&' : '?';
+  const msg = res.ok ? 'บันทึกแล้ว' : (res.error ?? 'ทำรายการไม่สำเร็จ');
+  return Astro.redirect(`${back}${sep}msg=${encodeURIComponent(msg)}&ok=${res.ok ? 1 : 0}`, 303);
+}
+
+const q = Astro.url.searchParams.get('q') ?? '';
+const limit = 50;
+const offset = Math.max(0, Number(Astro.url.searchParams.get('offset') ?? 0) || 0);
+
+const res = await callApiPaged<Row>(
+  Astro.request,
+  `/api/v1/admin/users?limit=${limit}&offset=${offset}&q=${encodeURIComponent(q)}`,
+);
+const rows = res.data ?? [];
+const { total } = res.meta;
+
+const msg = Astro.url.searchParams.get('msg');
+const msgOk = Astro.url.searchParams.get('ok') !== '0';
+const back = Astro.url.pathname + Astro.url.search;
+---
+
+<Admin title="ผู้ใช้" admin={admin} current="users">
+  <header>
+    <h1>ผู้ใช้</h1>
+    <p>ทั้งหมด {fmtInt(total)} บัญชี</p>
+  </header>
+
+  {msg && <p class={`flash ${msgOk ? '' : 'bad'}`}>{msg}</p>}
+
+  <form class="toolbar" method="get">
+    <input type="search" name="q" value={q} placeholder="ค้นหาชื่อหรืออีเมล" />
+    <button class="btn btn-outline btn-sm" type="submit">ค้นหา</button>
+    {q && <a class="btn btn-outline btn-sm" href="/admin/users">ล้าง</a>}
+  </form>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ผู้ใช้</th>
+          <th>ช่องทาง</th>
+          <th>สถานะ</th>
+          <th>แพ็กเกจ</th>
+          <th class="num">ประกาศ</th>
+          <th class="num">ติดต่อ</th>
+          <th>สมัครเมื่อ</th>
+          <th>จัดการ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 && (
+          <tr>
+            <td colspan="8" class="empty-row">
+              {q ? `ไม่พบผู้ใช้ที่ตรงกับ “${q}”` : 'ยังไม่มีผู้ใช้ในระบบ'}
+            </td>
+          </tr>
+        )}
+
+        {rows.map((u) => {
+          const left = daysLeft(u.pro_until);
+          return (
+            <tr>
+              <td>
+                <strong>{u.display_name}</strong>
+                <br />
+                <span class="muted mono">{u.email || '—'}</span>
+              </td>
+              <td class="muted">{u.provider}</td>
+              <td>
+                {u.status === 'active' ? (
+                  <span class="pill ok">ใช้งานอยู่</span>
+                ) : (
+                  <span class="pill warn">ถูกระงับ</span>
+                )}
+              </td>
+              <td>
+                {u.is_pro ? (
+                  <>
+                    <span class="pill pro">Pro</span>
+                    <br />
+                    <span class="muted">เหลือ {left} วัน</span>
+                  </>
+                ) : (
+                  <span class="muted">ฟรี</span>
+                )}
+              </td>
+              <td class="num">{fmtInt(u.active_posts)}</td>
+              <td class="num">{fmtInt(u.total_leads)}</td>
+              <td class="muted">{fmtDate(u.created_at)}</td>
+              <td>
+                <div class="row-actions">
+                  {/* แถมวัน Pro — ต้องมีตอนช่วงเปิดตัวและตอนชดเชยลูกค้า
+                      ระบบจะลงบัญชีเป็น payment method='comp' ให้อัตโนมัติ */}
+                  <form method="post" class="inline-form">
+                    <input type="hidden" name="action" value="grant" />
+                    <input type="hidden" name="id" value={u.id} />
+                    <input type="hidden" name="back" value={back} />
+                    <input
+                      type="number"
+                      name="days"
+                      value="30"
+                      min="-365"
+                      max="365"
+                      aria-label="จำนวนวัน"
+                    />
+                    <button class="btn btn-outline btn-sm" type="submit">แถมวัน</button>
+                  </form>
+
+                  <form method="post">
+                    <input
+                      type="hidden"
+                      name="action"
+                      value={u.status === 'active' ? 'suspend' : 'activate'}
+                    />
+                    <input type="hidden" name="id" value={u.id} />
+                    <input type="hidden" name="back" value={back} />
+                    <button class="btn btn-outline btn-sm" type="submit">
+                      {u.status === 'active' ? 'ระงับ' : 'คืนสิทธิ์'}
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+
+  <nav class="pager">
+    <span>
+      แสดง {fmtInt(Math.min(offset + 1, total))}–{fmtInt(Math.min(offset + limit, total))} จาก{' '}
+      {fmtInt(total)}
+    </span>
+    <span class="links">
+      <a
+        class="btn btn-outline btn-sm"
+        href={pageHref(Astro.url, { offset: Math.max(0, offset - limit) || null, msg: null, ok: null })}
+        aria-disabled={offset === 0}>ก่อนหน้า</a
+      >
+      <a
+        class="btn btn-outline btn-sm"
+        href={pageHref(Astro.url, { offset: offset + limit, msg: null, ok: null })}
+        aria-disabled={offset + limit >= total}>ถัดไป</a
+      >
+    </span>
+  </nav>
+</Admin>
+
+<style>
+  .row-actions {
+    display: flex;
+    gap: var(--sp-2);
+    align-items: center;
+  }
+</style>

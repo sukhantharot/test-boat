@@ -1,0 +1,398 @@
+---
+import Base from '../../layouts/Base.astro';
+import { apiError, apiRequest, getMe } from '../../lib/session';
+import type { Category } from '../../lib/api';
+
+export const prerender = false;
+
+const cookie = Astro.request.headers.get('cookie');
+const ua = Astro.request.headers.get('user-agent');
+
+const me = await getMe(cookie);
+if (!me) return Astro.redirect('/login?next=%2Fpost%2Fnew', 302);
+
+let error = '';
+let form = {
+  title: '',
+  description: '',
+  category_id: '',
+  province: '',
+  price_from_baht: '',
+  price_unit: 'job',
+  contact_phone: '',
+  contact_line: '',
+  status: 'active',
+};
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const str = (k: string) => String(fd.get(k) ?? '').trim();
+
+  form = {
+    title: str('title'),
+    description: str('description'),
+    category_id: str('category_id'),
+    province: str('province'),
+    price_from_baht: str('price_from_baht'),
+    price_unit: str('price_unit'),
+    contact_phone: str('contact_phone'),
+    contact_line: str('contact_line'),
+    status: str('status') === 'hidden' ? 'hidden' : 'active',
+  };
+
+  // ช่องราคาว่าง = "สอบถามราคา" ต้องส่ง null ไม่ใช่ 0
+  // Number('') คือ 0 ซึ่งจะกลายเป็นประกาศราคา 0 บาท — พลาดง่ายและดูแย่มากบนฟีด
+  const priceRaw = form.price_from_baht.replace(/,/g, '');
+  const price = priceRaw === '' ? null : Number(priceRaw);
+  const categoryId = form.category_id === '' ? null : Number(form.category_id);
+
+  if (price !== null && !Number.isFinite(price)) {
+    error = 'ราคาต้องเป็นตัวเลข';
+  } else {
+    const res = await apiRequest('/api/v1/me/posts', {
+      method: 'POST',
+      // field ต้องตรงกับ postInput ใน api/internal/httpx/posts_handlers.go เป๊ะๆ
+      // (DisallowUnknownFields) — images ยังไม่มีระบบอัปโหลด เลยไม่ส่งไปเลย
+      body: {
+        title: form.title,
+        description: form.description,
+        category_id: categoryId,
+        province: form.province,
+        price_from_baht: price,
+        price_unit: form.price_unit,
+        contact_phone: form.contact_phone,
+        contact_line: form.contact_line,
+        status: form.status,
+      },
+      cookie,
+      userAgent: ua,
+      forwardedFor: Astro.clientAddress,
+    });
+
+    if (res.ok) {
+      const { data } = (await res.json()) as { data: { id: number; slug: string } };
+      return Astro.redirect(`/services/${encodeURIComponent(data.slug)}`, 303);
+    }
+    error = await apiError(res, 'ลงประกาศไม่สำเร็จ กรุณาลองใหม่');
+  }
+}
+
+let categories: Category[] = [];
+try {
+  const res = await apiRequest('/api/v1/categories', { cookie });
+  if (res.ok) categories = ((await res.json()) as { data: Category[] }).data;
+} catch {
+  // ไม่มีหมวดหมู่ก็ยังลงประกาศได้ (category_id เป็น optional) ไม่ต้องล้มทั้งหน้า
+}
+
+const atLimit = me.active_posts >= me.post_limit;
+
+// จังหวัดที่มีงานฟรีแลนซ์เยอะสุด — ใส่เป็น datalist ไม่ใช่ select
+// เพราะพิมพ์จังหวัดอื่นได้ด้วย (API รับ text อะไรก็ได้ไม่เกิน 60 ตัว)
+const PROVINCES = [
+  'กรุงเทพมหานคร', 'นนทบุรี', 'ปทุมธานี', 'สมุทรปราการ', 'เชียงใหม่', 'เชียงราย',
+  'ขอนแก่น', 'นครราชสีมา', 'อุดรธานี', 'ชลบุรี', 'ระยอง', 'ภูเก็ต', 'สุราษฎร์ธานี',
+  'สงขลา', 'นครปฐม', 'อยุธยา', 'ลำปาง', 'พิษณุโลก', 'อุบลราชธานี', 'หาดใหญ่',
+];
+
+const UNITS = [
+  { v: 'job', label: 'ต่องาน' },
+  { v: 'hour', label: 'ต่อชั่วโมง' },
+  { v: 'day', label: 'ต่อวัน' },
+  { v: 'piece', label: 'ต่อชิ้น' },
+];
+---
+
+<Base
+  title="ลงประกาศรับงาน | Boat"
+  description="ลงประกาศรับงานฟรีบน Boat — ผู้จ้างติดต่อคุณได้โดยตรง ไม่หักค่าคอมมิชชั่น"
+  noindex={true}
+>
+  <main id="content">
+    <header class="head">
+      <h1>ลงประกาศรับงาน</h1>
+      <p class="lede">
+        เขียนให้ผู้จ้างเข้าใจในรอบเดียวว่าคุณรับทำอะไร ได้ผลลัพธ์แบบไหน และเริ่มที่ราคาเท่าไหร่
+      </p>
+      <p class="quota">
+        ใช้ไป <strong>{me.active_posts}</strong> จาก <strong>{me.post_limit}</strong> ประกาศ
+        {me.is_pro ? <span class="badge">Pro</span> : <span class="tier">บัญชีฟรี</span>}
+      </p>
+    </header>
+
+    {atLimit && (
+      <p class="notice">
+        {me.is_pro
+          ? 'คุณลงประกาศครบ 10 รายการแล้ว — ปิดรายการเดิมก่อนจึงจะลงใหม่ได้'
+          : 'บัญชีฟรีลงประกาศได้ 1 รายการ — อัปเกรดเป็น Pro 300฿/30วัน เพื่อลงได้ถึง 10 รายการและขึ้นบนสุดของฟีด'}
+        {' '}คุณยังบันทึกประกาศนี้แบบ “ซ่อนไว้ก่อน” ได้
+      </p>
+    )}
+
+    {error && <p class="error" role="alert">{error}</p>}
+
+    <form method="post">
+      <label>
+        <span>ชื่อประกาศ</span>
+        <input
+          type="text"
+          name="title"
+          value={form.title}
+          required
+          minlength="10"
+          maxlength="120"
+          placeholder="เช่น รับออกแบบโลโก้ + Brand Guide ครบชุด แก้ไม่จำกัด"
+        />
+        <small>อย่างน้อย 10 ตัวอักษร — ใส่คำที่ผู้จ้างจะพิมพ์ค้นหาจริงๆ</small>
+      </label>
+
+      <label>
+        <span>หมวดหมู่</span>
+        <select name="category_id">
+          <option value="">— ไม่ระบุ —</option>
+          {categories.map((c) => (
+            <option value={String(c.id)} selected={form.category_id === String(c.id)}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label>
+        <span>รายละเอียดงาน</span>
+        <textarea
+          name="description"
+          rows="9"
+          required
+          minlength="20"
+          maxlength="5000"
+          placeholder={'สิ่งที่ลูกค้าจะได้รับ\nขั้นตอนการทำงาน\nระยะเวลา\nสิ่งที่ต้องเตรียมให้'}
+        >{form.description}</textarea>
+        <small>อย่างน้อย 20 ตัวอักษร — เว้นบรรทัดได้ ระบบจะคงรูปแบบไว้</small>
+      </label>
+
+      <div class="row">
+        <label>
+          <span>ราคาเริ่มต้น <em>(บาท — เว้นว่าง = สอบถามราคา)</em></span>
+          <input
+            type="text"
+            name="price_from_baht"
+            value={form.price_from_baht}
+            inputmode="decimal"
+            placeholder="3500"
+          />
+        </label>
+
+        <label>
+          <span>หน่วย</span>
+          <select name="price_unit">
+            {UNITS.map((u) => (
+              <option value={u.v} selected={form.price_unit === u.v}>{u.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <label>
+        <span>จังหวัด <em>(ไม่บังคับ)</em></span>
+        <input
+          type="text"
+          name="province"
+          value={form.province}
+          maxlength="60"
+          list="provinces"
+          placeholder="เช่น กรุงเทพมหานคร"
+        />
+        <datalist id="provinces">
+          {PROVINCES.map((p) => <option value={p} />)}
+        </datalist>
+        <small>งานที่ต้องเจอตัว (ช่าง ถ่ายภาพ) ควรใส่ — ผู้จ้างกรองตามจังหวัดได้</small>
+      </label>
+
+      <fieldset class="contact">
+        <legend>ช่องทางติดต่อ</legend>
+        {!me.is_pro && (
+          <p class="hint">
+            บัญชีฟรี: ระบบจะ<strong>ซ่อน</strong>เบอร์และ LINE ไว้
+            ผู้จ้างติดต่อผ่านฟอร์มแทน แล้วเราส่งต่อให้คุณ
+            อัปเกรด Pro เพื่อให้ผู้จ้างโทรตรงได้
+          </p>
+        )}
+        <div class="row">
+          <label>
+            <span>เบอร์โทร</span>
+            <input
+              type="tel"
+              name="contact_phone"
+              value={form.contact_phone}
+              maxlength="20"
+              inputmode="tel"
+              placeholder="08x-xxx-xxxx"
+            />
+          </label>
+          <label>
+            <span>LINE ID</span>
+            <input type="text" name="contact_line" value={form.contact_line} maxlength="60" placeholder="@yourline" />
+          </label>
+        </div>
+      </fieldset>
+
+      <label>
+        <span>สถานะ</span>
+        <select name="status">
+          <option value="active" selected={form.status === 'active'} disabled={atLimit}>
+            เผยแพร่ทันที
+          </option>
+          <option value="hidden" selected={form.status === 'hidden' || atLimit}>
+            ซ่อนไว้ก่อน (ยังไม่ให้ใครเห็น)
+          </option>
+        </select>
+      </label>
+
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">ลงประกาศ</button>
+        <a class="btn btn-outline" href="/">ยกเลิก</a>
+      </div>
+    </form>
+  </main>
+</Base>
+
+<style>
+  main {
+    max-width: 42rem;
+    margin: 0 auto;
+    padding: var(--sp-6) var(--sp-4) var(--sp-7);
+  }
+
+  h1 {
+    font-size: var(--step-3);
+  }
+
+  .lede {
+    margin-top: var(--sp-2);
+    color: var(--text-muted);
+    font-size: var(--step-0);
+  }
+
+  .quota {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    align-items: center;
+    margin-top: var(--sp-4);
+    color: var(--text-muted);
+    font-size: var(--step--1);
+  }
+
+  .tier {
+    padding: 0.0625rem 0.4375rem;
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    background: var(--bg-subtle);
+    font-size: 0.6875rem;
+    font-weight: 600;
+  }
+
+  .notice,
+  .error {
+    margin-top: var(--sp-4);
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--warn-border);
+    border-radius: var(--r-md);
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    font-size: var(--step--1);
+  }
+
+  form {
+    display: grid;
+    gap: var(--sp-5);
+    margin-top: var(--sp-6);
+  }
+
+  label {
+    display: grid;
+    gap: var(--sp-2);
+  }
+
+  label > span {
+    font-size: var(--step--1);
+    font-weight: 600;
+  }
+
+  label > span em {
+    color: var(--text-faint);
+    font-style: normal;
+    font-weight: 400;
+  }
+
+  input,
+  select,
+  textarea {
+    width: 100%;
+    padding: 0.625rem var(--sp-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm);
+    background: var(--bg);
+    color: var(--text);
+    font-family: inherit;
+  }
+
+  textarea {
+    line-height: var(--lh-body);
+    resize: vertical;
+  }
+
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    border-color: var(--brand);
+    outline: 2px solid var(--brand-soft);
+    outline-offset: 0;
+  }
+
+  small {
+    color: var(--text-faint);
+    font-size: 0.75rem;
+  }
+
+  .row {
+    display: grid;
+    gap: var(--sp-4);
+  }
+
+  @media (min-width: 34rem) {
+    .row {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .contact {
+    display: grid;
+    gap: var(--sp-3);
+    margin: 0;
+    padding: var(--sp-4);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-subtle);
+  }
+
+  legend {
+    padding-inline: var(--sp-2);
+    font-size: var(--step--1);
+    font-weight: 700;
+  }
+
+  .hint {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    line-height: var(--lh-body);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    margin-top: var(--sp-1);
+  }
+</style>

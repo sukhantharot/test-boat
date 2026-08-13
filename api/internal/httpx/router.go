@@ -75,6 +75,8 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Get("/posts", s.adminListPosts)
 				r.Patch("/posts/{id}", s.adminUpdatePost)
 				r.Get("/payments", s.adminListPayments)
+				r.Post("/demo", s.adminSeedDemo)
+				r.Delete("/demo", s.adminPurgeDemo)
 			})
 		})
 

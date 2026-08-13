@@ -1,0 +1,116 @@
+---
+import '../../styles/global.css';
+import '../../styles/admin.css';
+import { callApi } from '../../lib/backend';
+import { rejectCrossSite } from '../../lib/csrf';
+
+export const prerender = false;
+
+let error: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const blocked = rejectCrossSite(Astro.request);
+  if (blocked) return blocked;
+
+  const form = await Astro.request.formData();
+  const res = await callApi(Astro.request, '/api/v1/admin/login', {
+    method: 'POST',
+    body: JSON.stringify({
+      email: String(form.get('email') ?? ''),
+      password: String(form.get('password') ?? ''),
+    }),
+  });
+
+  if (res.ok) {
+    // ส่ง Set-Cookie ของ API ต่อให้เบราว์เซอร์ — เพราะวิ่งผ่าน Astro
+    // cookie จึงถูกผูกกับโดเมนของเว็บ (first-party) ไม่ใช่โดเมนของ api
+    //
+    // ⚠ ต้องประกอบ Response เอง ห้ามใช้ Astro.redirect()
+    // Astro.redirect สร้าง Response ใหม่และทิ้ง header ที่ append ไว้ใน
+    // Astro.response ผลคือ login ผ่าน (303) แต่เบราว์เซอร์ไม่ได้ cookie
+    // แล้วโดนเด้งกลับมาหน้า login วนไม่จบ
+    const headers = new Headers({ location: '/admin' });
+    for (const c of res.setCookies) headers.append('set-cookie', c);
+    return new Response(null, { status: 303, headers });
+  }
+  error = res.error ?? 'เข้าสู่ระบบไม่สำเร็จ';
+}
+---
+
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>เข้าสู่ระบบผู้ดูแล</title>
+    <meta name="robots" content="noindex,nofollow" />
+  </head>
+  <body>
+    <main class="login-wrap">
+      <form class="login-card" method="post">
+        <h1>หลังบ้าน Boat</h1>
+        <p class="sub">สำหรับผู้ดูแลระบบเท่านั้น — คนละบัญชีกับผู้ลงประกาศ</p>
+
+        {error && <p class="flash bad">{error}</p>}
+
+        <label for="email">อีเมล</label>
+        <input id="email" name="email" type="email" required autocomplete="username" autofocus />
+
+        <label for="password">รหัสผ่าน</label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          required
+          autocomplete="current-password"
+        />
+
+        <button class="btn btn-primary" type="submit">เข้าสู่ระบบ</button>
+      </form>
+    </main>
+  </body>
+</html>
+
+<style>
+  .login-wrap {
+    display: grid;
+    place-items: center;
+    min-height: 100dvh;
+    padding: var(--sp-4);
+    background: var(--bg-subtle);
+  }
+
+  .login-card {
+    display: grid;
+    gap: var(--sp-2);
+    width: 100%;
+    max-width: 22rem;
+    padding: var(--sp-6);
+    border: 1px solid var(--border);
+    border-radius: var(--r-xl);
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-md);
+  }
+
+  h1 {
+    font-size: var(--step-2);
+  }
+
+  .sub {
+    margin-bottom: var(--sp-3);
+    color: var(--text-muted);
+    font-size: var(--step--1);
+  }
+
+  label {
+    font-size: var(--step--1);
+    font-weight: 600;
+  }
+
+  input {
+    width: 100%;
+  }
+
+  button {
+    margin-top: var(--sp-4);
+  }
+</style>

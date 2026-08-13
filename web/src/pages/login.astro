@@ -1,0 +1,272 @@
+---
+import Base from '../layouts/Base.astro';
+import { apiError, apiRequest, getMe, redirectWithCookies } from '../lib/session';
+
+export const prerender = false;
+
+// จัดการฟอร์มบน server ทั้งหมด ไม่ใช้ JS เลย:
+//   - ใช้ได้แม้ JS พัง/ยังโหลดไม่เสร็จ (ฟอร์ม login ต้องไม่มีวันใช้ไม่ได้)
+//   - Set-Cookie จาก API ถูก relay ต่อบนโดเมนเว็บ = first-party ตามที่ auth.go ตั้งใจ
+//   - ไม่ต้องเขียน client-side validation ซ้ำกับที่ Go validate อยู่แล้ว
+
+const cookie = Astro.request.headers.get('cookie');
+const ua = Astro.request.headers.get('user-agent');
+
+/** กัน open redirect: รับเฉพาะ path ในเว็บนี้ ไม่รับ //evil.com หรือ URL เต็ม */
+function safeNext(raw: string | null): string {
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return '/post/new';
+  return raw;
+}
+
+const next = safeNext(Astro.url.searchParams.get('next'));
+const mode = Astro.url.searchParams.get('mode') === 'register' ? 'register' : 'login';
+
+let error = '';
+// เก็บค่าที่กรอกไว้ตอน error — ไม่มีอะไรน่าโมโหกว่าต้องพิมพ์ใหม่ทั้งฟอร์ม (ยกเว้นรหัสผ่าน)
+let form = { email: '', display_name: '', phone: '' };
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const str = (k: string) => String(fd.get(k) ?? '').trim();
+
+  form = { email: str('email'), display_name: str('display_name'), phone: str('phone') };
+  const password = String(fd.get('password') ?? '');
+  const isRegister = str('intent') === 'register';
+
+  const res = await apiRequest(isRegister ? '/api/v1/auth/register' : '/api/v1/auth/login', {
+    method: 'POST',
+    // ห้ามส่ง field เกินนี้ — API ใช้ DisallowUnknownFields() แล้วจะตอบ 400
+    body: isRegister
+      ? {
+          email: form.email,
+          password,
+          display_name: form.display_name,
+          phone: form.phone,
+        }
+      : { email: form.email, password },
+    cookie,
+    userAgent: ua,
+    forwardedFor: Astro.clientAddress,
+  });
+
+  if (res.ok) {
+    return redirectWithCookies(next, res);
+  }
+  error = await apiError(res, 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่');
+}
+
+// login อยู่แล้วไม่ต้องเห็นหน้านี้ (เช็คหลัง POST เพื่อไม่กิน request เกินตอน submit)
+if (Astro.request.method === 'GET') {
+  const me = await getMe(cookie);
+  if (me) return Astro.redirect(next, 302);
+}
+
+const isRegister = mode === 'register';
+const title = isRegister ? 'สมัครสมาชิก' : 'เข้าสู่ระบบ';
+const tabHref = (m: 'login' | 'register') =>
+  `/login?mode=${m}${next !== '/post/new' ? `&next=${encodeURIComponent(next)}` : ''}`;
+---
+
+<Base
+  title={`${title} | Boat`}
+  description="เข้าสู่ระบบเพื่อลงประกาศรับงานบน Boat มาร์เก็ตเพลสฟรีแลนซ์ไทย"
+  noindex={true}
+>
+  <main id="content">
+    <div class="card">
+      <div class="tabs" role="tablist">
+        <a href={tabHref('login')} role="tab" aria-selected={!isRegister ? 'true' : 'false'}>
+          เข้าสู่ระบบ
+        </a>
+        <a href={tabHref('register')} role="tab" aria-selected={isRegister ? 'true' : 'false'}>
+          สมัครสมาชิก
+        </a>
+      </div>
+
+      <div class="body">
+        <h1>{isRegister ? 'สมัครใช้งานฟรี' : 'เข้าสู่ระบบ'}</h1>
+        <p class="lede">
+          {isRegister
+            ? 'ลงประกาศได้ทันทีหลังสมัคร ไม่ต้องยืนยันอีเมล บัญชีฟรีใช้ได้ตลอดไป'
+            : 'ยังไม่มีบัญชี? กดแท็บ “สมัครสมาชิก” ด้านบน ใช้เวลาไม่ถึงนาที'}
+        </p>
+
+        {error && <p class="error" role="alert">{error}</p>}
+
+        <form method="post">
+          <input type="hidden" name="intent" value={isRegister ? 'register' : 'login'} />
+
+          <label>
+            <span>อีเมล</span>
+            <input
+              type="email"
+              name="email"
+              value={form.email}
+              required
+              autocomplete="email"
+              inputmode="email"
+              placeholder="you@example.com"
+            />
+          </label>
+
+          {isRegister && (
+            <label>
+              <span>ชื่อที่ใช้แสดง</span>
+              <input
+                type="text"
+                name="display_name"
+                value={form.display_name}
+                required
+                maxlength="80"
+                autocomplete="name"
+                placeholder="ชื่อ-นามสกุล หรือชื่อร้าน"
+              />
+              <small>ผู้จ้างจะเห็นชื่อนี้บนประกาศของคุณ</small>
+            </label>
+          )}
+
+          <label>
+            <span>รหัสผ่าน</span>
+            <input
+              type="password"
+              name="password"
+              required
+              minlength="8"
+              autocomplete={isRegister ? 'new-password' : 'current-password'}
+            />
+            {isRegister && <small>อย่างน้อย 8 ตัวอักษร</small>}
+          </label>
+
+          {isRegister && (
+            <label>
+              <span>เบอร์โทร <em>(ไม่บังคับ)</em></span>
+              <input
+                type="tel"
+                name="phone"
+                value={form.phone}
+                maxlength="20"
+                autocomplete="tel"
+                inputmode="tel"
+                placeholder="08x-xxx-xxxx"
+              />
+              <small>ใช้ติดต่อเรื่องบัญชีเท่านั้น ไม่แสดงบนประกาศ</small>
+            </label>
+          )}
+
+          <button class="btn btn-primary" type="submit">{title}</button>
+        </form>
+      </div>
+    </div>
+  </main>
+</Base>
+
+<style>
+  main {
+    display: grid;
+    place-items: start center;
+    padding: var(--sp-6) var(--sp-4) var(--sp-7);
+  }
+
+  .card {
+    width: 100%;
+    max-width: 26rem;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-md);
+  }
+
+  .tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+
+  .tabs a {
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    font-size: var(--step--1);
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+  }
+
+  .tabs a[aria-selected='true'] {
+    border-bottom-color: var(--brand);
+    background: var(--bg-elevated);
+    color: var(--text);
+  }
+
+  .body {
+    padding: var(--sp-5);
+  }
+
+  h1 {
+    font-size: var(--step-2);
+  }
+
+  .lede {
+    margin-top: var(--sp-2);
+    color: var(--text-muted);
+    font-size: var(--step--1);
+  }
+
+  .error {
+    margin-top: var(--sp-4);
+    padding: var(--sp-3);
+    border: 1px solid var(--warn-border);
+    border-radius: var(--r-sm);
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    font-size: var(--step--1);
+  }
+
+  form {
+    display: grid;
+    gap: var(--sp-4);
+    margin-top: var(--sp-5);
+  }
+
+  label {
+    display: grid;
+    gap: var(--sp-2);
+  }
+
+  label > span {
+    font-size: var(--step--1);
+    font-weight: 600;
+  }
+
+  label > span em {
+    color: var(--text-faint);
+    font-style: normal;
+    font-weight: 400;
+  }
+
+  input {
+    padding: 0.625rem var(--sp-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm);
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  input:focus-visible {
+    border-color: var(--brand);
+    outline: 2px solid var(--brand-soft);
+    outline-offset: 0;
+  }
+
+  small {
+    color: var(--text-faint);
+    font-size: 0.75rem;
+  }
+
+  button {
+    margin-top: var(--sp-1);
+    width: 100%;
+  }
+</style>

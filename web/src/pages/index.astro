@@ -144,7 +144,7 @@ const title = titleBits.length
               : filtered
                 ? `พบ ${total.toLocaleString('th-TH')} ประกาศ`
                 : 'ประกาศล่าสุดจากผู้ให้บริการ อัปเดตทุกวัน'}
-            {!apiDown && totalPages > 1 && ` · หน้า ${page} จาก ${totalPages}`}
+            {!apiDown && posts.length > 0 && totalPages > 1 && ` · หน้า ${page} จาก ${totalPages}`}
           </p>
         </div>
         {filtered && <a class="chip" href="/#feed">ล้างทั้งหมด ✕</a>}
@@ -195,7 +195,20 @@ const title = titleBits.length
         </p>
       )}
 
-      {!apiDown && !filtered && posts.length === 0 && (
+      {/* ⚠ เคสนี้ต้องมาก่อน 2 เคสข้างล่าง: ขอหน้าที่เลยของจริงไปแล้ว (bookmark เก่า,
+          ลิงก์ค้างใน Google, หรือคนแก้ URL เอง)  ห้ามบอกว่า "ยังไม่มีประกาศในระบบ"
+          เพราะมีเป็นพันรายการ แค่หน้านี้ไม่มี — และต้องมีทางกลับ ไม่งั้นตีบตัน
+          (API คืน meta.total = 0 เมื่อ offset เลยข้อมูล เพราะ count(*) OVER () ไม่มีแถวให้นับ
+           ทำให้ totalPages ยุบเหลือ 1 แล้ว pager หายไปด้วย) */}
+      {!apiDown && posts.length === 0 && page > 1 && (
+        <div class="blank">
+          <h3>หน้านี้ไม่มีประกาศแล้ว</h3>
+          <p>ประกาศอาจถูกปิดหรือถูกย้ายไปแล้วตั้งแต่คุณเปิดลิงก์นี้</p>
+          <a class="btn btn-primary" href={pageHref(1)}>กลับไปหน้าแรกของรายการ</a>
+        </div>
+      )}
+
+      {!apiDown && !filtered && posts.length === 0 && page === 1 && (
         <div class="blank">
           <h3>ยังไม่มีประกาศในระบบ</h3>
           <p>เว็บเพิ่งเปิด — ลงประกาศตอนนี้แล้วคุณจะเป็นคนแรกที่ผู้จ้างเห็น</p>
@@ -203,7 +216,7 @@ const title = titleBits.length
         </div>
       )}
 
-      {!apiDown && filtered && posts.length === 0 && (
+      {!apiDown && filtered && posts.length === 0 && page === 1 && (
         <div class="blank">
           <h3>ไม่พบประกาศที่ตรงกับที่ค้นหา</h3>
           <p>ลองใช้คำที่สั้นลง เอาตัวกรองบางตัวออก หรือดูประกาศทั้งหมดที่มีอยู่</p>
@@ -251,7 +264,10 @@ const title = titleBits.length
 
       {/* แบ่งหน้าด้วยลิงก์จริง ไม่ใช่ infinite scroll — Googlebot ไต่ได้ และคนกด
           back จากหน้าโพสแล้วยังอยู่หน้าเดิม  rel prev/next บอกความสัมพันธ์ให้ครอว์เลอร์ */}
-      {!apiDown && totalPages > 1 && (
+      {/* ต้องมี posts.length > 0: ขอหน้าที่เลยของจริง (page=999 จาก 84 หน้า) จะได้
+          ไม่ขึ้น pager ว่า "หน้า 999 / 84" ซึ่งอ่านแล้วสับสน — เคสนั้นใช้ปุ่ม
+          "กลับไปหน้าแรกของรายการ" ในกล่องว่างข้างบนพากลับแทน */}
+      {!apiDown && posts.length > 0 && totalPages > 1 && (
         <nav class="pager" aria-label="หน้าของผลการค้นหา">
           {page > 1 ? (
             <a class="btn btn-outline btn-sm" rel="prev" href={pageHref(page - 1)}>← ก่อนหน้า</a>

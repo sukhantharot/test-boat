@@ -76,16 +76,23 @@ railway add --database postgres
 
 ### 2. สร้าง 3 services จาก repo เดียวกัน
 
-ใน Railway dashboard กด **New → GitHub Repo** เลือก repo นี้ **3 ครั้ง** แล้วตั้งค่าแต่ละตัว:
+ใน Railway dashboard กด **New → GitHub Repo** เลือก repo นี้ **3 ครั้ง** แล้วตั้งค่าแต่ละตัว
+(Root Directory อยู่ที่ **Settings → Source**)
 
-| Service | Root Directory | Config-as-code Path | Public Domain |
+| Service | Root Directory | Config File | Public Domain |
 |---|---|---|---|
-| `api` | `api` | `railway.json` | ✅ Generate |
-| `cron` | `api` | `railway.cron.json` | ❌ ไม่ต้อง |
-| `web` | `web` | `railway.json` | ✅ Generate + custom domain |
+| `api` | `/api` | *(ปล่อยว่าง — auto-detect)* | ✅ Generate |
+| `cron` | `/api` | `api/railway.cron.json` | ❌ ไม่ต้อง |
+| `web` | `/web` | *(ปล่อยว่าง — auto-detect)* | ✅ Generate + custom domain |
 
+> **ห้ามใส่ `dockerfilePath` ใน railway.json** — Railway resolve ค่านี้จาก **repo root**
+> แต่ resolve build context จาก **Root Directory** พอใส่ `"dockerfilePath": "Dockerfile"`
+> มันจะไปหาที่ repo root แล้วขึ้น `couldn't locate the dockerfile at path Dockerfile`
+> ปล่อยว่างไว้ Railway จะ auto-detect `Dockerfile` ที่ root ของ Root Directory ให้เอง
+>
 > `cron` ใช้ Dockerfile ตัวเดียวกับ `api` แค่เปลี่ยน `startCommand` เป็น `/app/cron`
 > ไม่ต้อง build image แยก และ**ห้าม**ตั้ง healthcheck ให้ `cron` เพราะ process จบแล้ว exit
+> (ถ้า `api/railway.cron.json` ไม่ถูกอ่าน ให้ลอง `railway.cron.json` แทน)
 
 ### 3. Variables
 

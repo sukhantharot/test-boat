@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.24-alpine AS build
+# ต้อง >= 1.25 เพราะ golang.org/x/crypto v0.55 บังคับไว้ (ดู go.mod)
+FROM golang:1.25-alpine AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./

@@ -8,6 +8,9 @@
 /api/cron
 *.exe
 
+# log ตอนรันบนเครื่องตัวเอง (api/api.log) — ไม่เอาขึ้น repo
+*.log
+
 # astro / node
 node_modules/
 /web/dist/

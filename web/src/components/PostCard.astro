@@ -1,0 +1,215 @@
+---
+import { baht, type Post } from '../lib/api';
+
+interface Props {
+  post: Post;
+}
+
+const { post } = Astro.props;
+
+// ยังไม่มีระบบอัปโหลดรูป (อยู่ใน TODO phase 1) — การ์ดที่ว่างเปล่าดูเหมือนเว็บร้าง
+// เลยทำอวาตาร์จากตัวอักษรแรก + สีที่ derive จากชื่อ: คนเดิมได้สีเดิมทุกครั้งที่ render
+const initial = Array.from(post.author.trim())[0] ?? '?';
+const hue = Array.from(post.author).reduce((acc, ch) => acc + ch.codePointAt(0)!, 0) % 6;
+---
+
+<li class:list={['card', { pro: post.is_pro }]}>
+  <a href={`/services/${post.slug}`}>
+    {post.is_pro && (
+      <p class="rank">
+        <span class="badge">
+          <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M6 .8l1.55 3.3 3.6.5-2.64 2.5.65 3.6L6 9.02 2.84 10.7l.65-3.6L.85 4.6l3.6-.5z"
+            />
+          </svg>
+          แนะนำ
+        </span>
+      </p>
+    )}
+
+    <h4>{post.title}</h4>
+
+    <p class="by">
+      <span class:list={['avatar', `av-${hue + 1}`]} aria-hidden="true">{initial}</span>
+      <span class="who">
+        <span class="name">
+          {post.author}
+          {post.is_pro && (
+            <svg class="check" viewBox="0 0 16 16" width="13" height="13" role="img" aria-label="ยืนยันตัวตนแล้ว">
+              <circle cx="8" cy="8" r="8" fill="currentColor" />
+              <path
+                fill="none"
+                stroke="var(--bg-elevated)"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M4.6 8.3l2.1 2.1 4.7-4.7"
+              />
+            </svg>
+          )}
+        </span>
+        {(post.category_name || post.province) && (
+          <span class="where">
+            {[post.category_name, post.province].filter(Boolean).join(' · ')}
+          </span>
+        )}
+      </span>
+    </p>
+
+    <p class="foot">
+      <span class="price">{baht(post.price_from_satang)}</span>
+      <span class="cta" aria-hidden="true">ดูรายละเอียด →</span>
+    </p>
+  </a>
+</li>
+
+<style>
+  .card {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-elevated);
+    transition:
+      border-color 0.18s var(--ease),
+      box-shadow 0.18s var(--ease),
+      transform 0.18s var(--ease);
+  }
+
+  .card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+
+  /* Pro ต้องเด่นกว่าฟรีแบบเห็นชัดในแวบเดียว — นี่คือของที่คนจ่าย 300฿ ซื้อ
+     ใช้เส้นทองบางๆ + แถบด้านซ้าย ไม่ใช้พื้นสีทั้งใบ เพราะฟีดจะลายตาเกิน */
+  .card.pro {
+    border-color: var(--pro-border);
+  }
+
+  .card.pro::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    border-radius: var(--r-lg) 0 0 var(--r-lg);
+    background: var(--pro-solid);
+  }
+
+  .card.pro:hover {
+    border-color: var(--pro-solid);
+  }
+
+  a {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    height: 100%;
+    padding: var(--sp-4);
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .rank {
+    margin-bottom: calc(var(--sp-1) * -1);
+  }
+
+  h4 {
+    font-size: var(--step-0);
+    font-weight: 650;
+    /* ตัด 2 บรรทัดเพื่อให้ทุกการ์ดในแถวสูงเท่ากัน ชื่อยาวไม่ทำ layout เบี้ยว */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .by {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+
+  .avatar {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--r-pill);
+    color: #fff;
+    font-size: var(--step--1);
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .av-1 { background: var(--av-1); }
+  .av-2 { background: var(--av-2); }
+  .av-3 { background: var(--av-3); }
+  .av-4 { background: var(--av-4); }
+  .av-5 { background: var(--av-5); }
+  .av-6 { background: var(--av-6); }
+
+  .who {
+    display: grid;
+    min-width: 0;
+    line-height: 1.35;
+  }
+
+  .name {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: var(--step--1);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .check {
+    flex: none;
+    color: var(--brand);
+  }
+
+  .where {
+    color: var(--text-faint);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .foot {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    /* ดันไปชิดล่างเสมอ ราคาของทุกการ์ดจะอยู่แนวเดียวกัน */
+    margin-top: auto;
+    padding-top: var(--sp-3);
+    border-top: 1px solid var(--border);
+  }
+
+  .price {
+    font-size: var(--step-1);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .cta {
+    color: var(--text-faint);
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: color 0.15s var(--ease);
+  }
+
+  .card:hover .cta {
+    color: var(--brand-text);
+  }
+</style>

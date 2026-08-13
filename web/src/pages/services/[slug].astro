@@ -61,7 +61,7 @@ const hasContact = Boolean(post.contact_phone || post.contact_line);
   noindex={noindex}
   jsonLd={jsonLd}
 >
-  <main>
+  <main id="content">
     {!post.visible && (
       <p class="expired">
         ประกาศนี้ปิดรับงานชั่วคราว — <a href="/">ดูฟรีแลนซ์คนอื่นที่ยังรับงานอยู่</a>
@@ -91,7 +91,7 @@ const hasContact = Boolean(post.contact_phone || post.contact_line);
         <section class="contact">
           <h2>สนใจงานนี้?</h2>
           <p>ส่งข้อความถึงผู้ให้บริการ แล้วรอการติดต่อกลับ</p>
-          <a class="btn" href={`/contact/${post.slug}`}>ส่งข้อความ</a>
+          <a class="btn btn-primary" href={`/contact/${post.slug}`}>ส่งข้อความ</a>
         </section>
       )
     )}
@@ -99,17 +99,84 @@ const hasContact = Boolean(post.contact_phone || post.contact_line);
 </Base>
 
 <style>
-  main { max-width: 44rem; margin: 0 auto; padding: 2rem 1rem; font-family: system-ui, sans-serif; }
-  h1 { font-size: 1.5rem; margin: 0 0 .5rem; }
-  .meta { color: #666; font-size: .875rem; margin: 0 0 .5rem; }
-  .badge { margin-left: .375rem; padding: .0625rem .375rem; font-size: .6875rem;
-           border-radius: 99px; background: #111; color: #fff; }
-  .price { font-size: 1.25rem; font-weight: 600; margin: 0 0 1.5rem; }
-  article { white-space: pre-wrap; line-height: 1.7; }
-  .expired { padding: .75rem 1rem; background: #fff3cd; border-radius: .5rem; margin-bottom: 1.5rem; }
-  .contact { margin-top: 2rem; padding: 1.25rem; border: 1px solid #e5e5e5; border-radius: .75rem;
-             display: grid; gap: .5rem; }
-  .contact h2 { font-size: 1rem; margin: 0; }
-  .btn { justify-self: start; padding: .625rem 1.25rem; background: #111; color: #fff;
-         border-radius: .5rem; text-decoration: none; }
+  /* สีและระยะทั้งหมดมาจาก token ใน src/styles/global.css — ห้าม hardcode ที่นี่
+     ไม่งั้นหน้านี้จะเป็นหน้าเดียวที่พังตอนโหมดมืด */
+  main {
+    max-width: 46rem;
+    margin: 0 auto;
+    padding: var(--sp-6) var(--sp-4) var(--sp-7);
+  }
+
+  h1 {
+    font-size: var(--step-3);
+    margin-bottom: var(--sp-3);
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1) 0;
+    align-items: center;
+    color: var(--text-muted);
+    font-size: var(--step--1);
+    margin-bottom: var(--sp-3);
+  }
+
+  .badge {
+    margin-left: var(--sp-2);
+  }
+
+  .price {
+    font-size: var(--step-2);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: var(--sp-5);
+  }
+
+  /* description เป็น plain text จากผู้ใช้ ต้องคง newline ที่เขาเคาะไว้ */
+  article {
+    white-space: pre-wrap;
+    line-height: var(--lh-body);
+  }
+
+  .expired {
+    padding: var(--sp-3) var(--sp-4);
+    margin-bottom: var(--sp-5);
+    border: 1px solid var(--warn-border);
+    border-radius: var(--r-md);
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    font-size: var(--step--1);
+  }
+
+  .contact {
+    display: grid;
+    gap: var(--sp-2);
+    margin-top: var(--sp-6);
+    padding: var(--sp-5);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-subtle);
+  }
+
+  .contact h2 {
+    font-size: var(--step-1);
+  }
+
+  .contact > a[href^='tel:'] {
+    font-size: var(--step-2);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+  }
+
+  .contact p {
+    color: var(--text-muted);
+    font-size: var(--step--1);
+  }
+
+  .btn {
+    justify-self: start;
+    margin-top: var(--sp-2);
+  }
 </style>

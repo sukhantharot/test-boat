@@ -1,66 +1,791 @@
 ---
 import Base from '../layouts/Base.astro';
-import { apiGet, baht, type Post } from '../lib/api';
+import PostCard from '../components/PostCard.astro';
+import { apiGet, type Category, type Paged, type Post } from '../lib/api';
 
-// SSR: เรียก Go API ผ่าน private network ตอน render
-let posts: Post[] = [];
-let apiDown = false;
-try {
-  const res = await apiGet<{ data: Post[] }>('/api/v1/posts');
-  posts = res.data;
-} catch {
-  apiDown = true; // API ล่มไม่ควรทำให้หน้าเว็บ 500 ทั้งหน้า
-}
+const PAGE_SIZE = 12;
+
+// ── อ่านตัวกรองจาก query string ────────────────────────────────────────
+// ทุกตัวกรองเป็น GET param ล้วนๆ ไม่มี JS: ใช้ได้แม้ JS พัง, กด back/forward ได้ถูก,
+// ส่งลิงก์ผลการค้นหาให้คนอื่นได้ และ Googlebot ก็ไต่ได้เอง
+const sp = Astro.url.searchParams;
+const q = (sp.get('q') ?? '').trim().slice(0, 80);
+const category = (sp.get('category') ?? '').trim().slice(0, 40);
+const province = (sp.get('province') ?? '').trim().slice(0, 60);
+const page = Math.max(1, Number.parseInt(sp.get('page') ?? '1', 10) || 1);
+const filtered = Boolean(q || category || province);
+
+// ── SSR: เรียก Go API ผ่าน private network ตอน render ──────────────────
+// กรอง/แบ่งหน้าที่ SQL ไม่ใช่ที่ JS — pg_trgm กับ index ทำงานอยู่ฝั่ง Postgres แล้ว
+// (ดู listPosts ใน api/internal/httpx/posts_handlers.go)
+const query = new URLSearchParams({
+  limit: String(PAGE_SIZE),
+  offset: String((page - 1) * PAGE_SIZE),
+});
+if (q) query.set('q', q);
+if (category) query.set('category', category);
+if (province) query.set('province', province);
+
+// allSettled ไม่ใช่ all: หมวดหมู่ล่มไม่ควรทำให้ฟีดหาย และฟีดล่มไม่ควรทำให้หน้าเว็บ 500
+const [feed, cats] = await Promise.allSettled([
+  apiGet<Paged<Post>>(`/api/v1/posts?${query}`),
+  apiGet<{ data: Category[] }>('/api/v1/categories'),
+]);
+
+const apiDown = feed.status === 'rejected';
+const posts = feed.status === 'fulfilled' ? feed.value.data : [];
+const total = feed.status === 'fulfilled' ? (feed.value.meta?.total ?? posts.length) : 0;
+const categories = cats.status === 'fulfilled' ? cats.value.data : [];
+
+const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+const categoryName = categories.find((c) => c.slug === category)?.name ?? category;
+
+// แยก "แนะนำ" (Pro) ออกหัวฟีดเฉพาะหน้าแรกที่ไม่ได้กรอง — นี่คือของที่ Pro จ่าย 300฿ ซื้อ
+// หน้า 2 ขึ้นไปห้ามแยก เพราะ Pro อาจล้นมาจากหน้าก่อน หัวข้อ "แนะนำ" กลางฟีดจะงง
+const grouped = !filtered && page === 1;
+const proPosts = grouped ? posts.filter((p) => p.is_pro) : [];
+const freePosts = grouped ? posts.filter((p) => !p.is_pro) : [];
+
+/** ทำ URL ใหม่โดยคงตัวกรองอื่นไว้ — ค่า null = ถอดตัวกรองนั้นออก */
+const hrefWith = (patch: Record<string, string | null>) => {
+  const next = new URLSearchParams();
+  if (q) next.set('q', q);
+  if (category) next.set('category', category);
+  if (province) next.set('province', province);
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) next.delete(key);
+    else next.set(key, value);
+  }
+  const qs = next.toString();
+  // ต่อ #feed ท้ายเสมอ — กดชิปกรองแล้วต้องเด้งไปที่ผลลัพธ์ ไม่ใช่เด้งกลับขึ้น hero
+  return qs ? `/?${qs}#feed` : '/#feed';
+};
+
+/** เปลี่ยนหน้าโดยคงตัวกรองเดิม (หน้า 1 ไม่ต้องมี ?page=1 ให้ URL สะอาด) */
+const pageHref = (n: number) => hrefWith({ page: n <= 1 ? null : String(n) });
+
+// ── SEO ─────────────────────────────────────────────────────────────────
+const origin = new URL('/', Astro.site ?? Astro.url.origin).href;
+
+// ⚠ ห้ามใส่ noindex ให้หน้าผลการค้นหา แม้มันจะเป็นเนื้อหาซ้ำก็ตาม
+// Base.astro สร้าง canonical จาก pathname เพียวๆ -> /?q=xxx มี canonical = "/"
+// ถ้าใส่ noindex ทับลงไปอีก Google อาจลากเอา noindex ไปใช้กับ canonical target
+// ซึ่งก็คือ "หน้าแรก" — เท่ากับยิงตีนตัวเอง  canonical ตัวเดียวพอที่จะรวมสัญญาณแล้ว
+const jsonLd = filtered
+  ? undefined
+  : {
+      '@context': 'https://schema.org',
+      '@type': 'WebSite',
+      name: 'Boat',
+      url: origin,
+      inLanguage: 'th-TH',
+      potentialAction: {
+        '@type': 'SearchAction',
+        target: { '@type': 'EntryPoint', urlTemplate: `${origin}?q={search_term_string}` },
+        'query-input': 'required name=search_term_string',
+      },
+    };
+
+const titleBits = [q && `“${q}”`, category && categoryName, province && province].filter(Boolean);
+const title = titleBits.length
+  ? `${titleBits.join(' · ')} | Boat รวมฟรีแลนซ์รับงานทั่วไทย`
+  : 'รวมฟรีแลนซ์รับงาน ทุกสาขา | ค้นหาผู้รับงานใกล้คุณ';
 ---
 
 <Base
-  title="รวมฟรีแลนซ์รับงาน ทุกสาขา | ค้นหาผู้รับงานใกล้คุณ"
+  title={title}
   description="รวมบริการจากฟรีแลนซ์ทั่วไทย กราฟิก เว็บ การตลาด ช่างซ่อม ติดต่อผู้ให้บริการได้โดยตรง ไม่ผ่านคนกลาง"
+  jsonLd={jsonLd}
 >
-  <main>
-    <header>
-      <h1>หาฟรีแลนซ์รับงาน</h1>
-      <p>เลือกผู้ให้บริการ แล้วติดต่อได้โดยตรง</p>
-    </header>
+  <main id="content">
+    <!-- ═══════════════════════════════════════════════════ hero -->
+    <section class="hero">
+      <div class="container hero-inner">
+        <h1>หาฟรีแลนซ์รับงาน<br /><em>ติดต่อตรง ไม่ผ่านคนกลาง</em></h1>
+        <p class="lede">
+          กราฟิก เว็บไซต์ การตลาด ตัดต่อวิดีโอ ช่างซ่อมในบ้าน
+          เลือกผู้ให้บริการที่ถูกใจ แล้วคุยกับเจ้าตัวได้เลย ไม่มีค่าคอมมิชชั่น
+        </p>
 
-    {apiDown && <p class="warn">ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้ง</p>}
+        <form class="search" method="get" action="/" role="search">
+          <label class="sr-only" for="q">ค้นหาบริการ</label>
+          <input
+            id="q"
+            type="search"
+            name="q"
+            value={q}
+            placeholder="ค้นหาบริการ เช่น ออกแบบโลโก้, ทำเว็บ, ซ่อมแอร์"
+            enterkeyhint="search"
+            autocomplete="off"
+          />
+          {/* ค้นหาใหม่ต้องคงหมวด/จังหวัดที่เลือกไว้ แต่ต้องรีเซ็ตกลับหน้า 1
+              (ไม่ใส่ page เป็น hidden) ไม่งั้นค้นคำใหม่แล้วไปโผล่หน้า 5 ที่ว่างเปล่า */}
+          {category && <input type="hidden" name="category" value={category} />}
+          {province && <input type="hidden" name="province" value={province} />}
+          <button class="btn btn-primary" type="submit">ค้นหา</button>
+        </form>
 
-    <ul class="feed">
-      {posts.map((p) => (
-        <li class:list={['card', { pro: p.is_pro }]}>
-          <a href={`/services/${p.slug}`}>
-            <h2>{p.title}</h2>
-            <p class="meta">
-              {p.author}
-              {p.is_pro && <span class="badge">ยืนยันแล้ว</span>}
-              {p.province && <span> · {p.province}</span>}
-            </p>
-            <p class="price">{baht(p.price_from_satang)}</p>
+        <ul class="perks">
+          <li>ลงประกาศฟรีตลอดชีพ</li>
+          <li>ไม่หัก % จากค่าจ้าง</li>
+          <li>ผู้ให้บริการทั่วประเทศ</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════ feed -->
+    <section class="feed-section container" id="feed">
+      <div class="section-head">
+        <div>
+          <h2>{filtered ? 'ผลการค้นหา' : 'ฟรีแลนซ์ที่กำลังรับงาน'}</h2>
+          <p class="sub">
+            {apiDown
+              ? 'ยังโหลดรายการไม่ได้'
+              : filtered
+                ? `พบ ${total.toLocaleString('th-TH')} ประกาศ`
+                : 'ประกาศล่าสุดจากผู้ให้บริการ อัปเดตทุกวัน'}
+            {!apiDown && totalPages > 1 && ` · หน้า ${page} จาก ${totalPages}`}
+          </p>
+        </div>
+        {filtered && <a class="chip" href="/#feed">ล้างทั้งหมด ✕</a>}
+      </div>
+
+      {/* ตัวกรองที่กำลังใช้ — แต่ละอันถอดออกเองได้ทีละตัว ไม่ใช่ล้างทั้งชุด
+          จำเป็นเพราะ q/หมวด/จังหวัด ซ้อนกันได้ ถ้าถอดทีเดียวหมดจะต้องเริ่มใหม่ทุกครั้ง */}
+      {filtered && (
+        <ul class="active-filters">
+          {q && (
+            <li>
+              <a class="chip" href={hrefWith({ q: null })}>คำค้น: {q} <span aria-hidden="true">✕</span></a>
+            </li>
+          )}
+          {category && (
+            <li>
+              <a class="chip" href={hrefWith({ category: null })}>{categoryName} <span aria-hidden="true">✕</span></a>
+            </li>
+          )}
+          {province && (
+            <li>
+              <a class="chip" href={hrefWith({ province: null })}>{province} <span aria-hidden="true">✕</span></a>
+            </li>
+          )}
+        </ul>
+      )}
+
+      {categories.length > 0 && (
+        <nav class="filters" aria-label="เลือกหมวดหมู่บริการ">
+          <a class="chip" href={hrefWith({ category: null })} aria-current={category ? 'false' : 'true'}>
+            ทุกหมวด
           </a>
-        </li>
-      ))}
-    </ul>
+          {categories.map((c) => (
+            <a
+              class="chip"
+              href={hrefWith({ category: c.slug })}
+              aria-current={category === c.slug ? 'true' : 'false'}
+            >
+              {c.name}
+            </a>
+          ))}
+        </nav>
+      )}
 
-    {posts.length === 0 && !apiDown && (
-      <p class="empty">ยังไม่มีประกาศ — <a href="/post/new">เป็นคนแรกที่ลงประกาศ</a></p>
-    )}
+      {apiDown && (
+        <p class="notice">
+          ระบบขัดข้องชั่วคราว ยังโหลดรายการประกาศไม่ได้ — กรุณาลองใหม่อีกครั้งในอีกสักครู่
+        </p>
+      )}
+
+      {!apiDown && !filtered && posts.length === 0 && (
+        <div class="blank">
+          <h3>ยังไม่มีประกาศในระบบ</h3>
+          <p>เว็บเพิ่งเปิด — ลงประกาศตอนนี้แล้วคุณจะเป็นคนแรกที่ผู้จ้างเห็น</p>
+          <a class="btn btn-primary" href="/post/new">เป็นคนแรกที่ลงประกาศ</a>
+        </div>
+      )}
+
+      {!apiDown && filtered && posts.length === 0 && (
+        <div class="blank">
+          <h3>ไม่พบประกาศที่ตรงกับที่ค้นหา</h3>
+          <p>ลองใช้คำที่สั้นลง เอาตัวกรองบางตัวออก หรือดูประกาศทั้งหมดที่มีอยู่</p>
+          <a class="btn btn-outline" href="/#feed">ดูประกาศทั้งหมด</a>
+        </div>
+      )}
+
+      {/* แยก "แนะนำ" ออกหัวฟีด — นี่คือของที่ Pro จ่าย 300฿ ซื้อ: พื้นที่บนสุด
+          ที่มีหัวข้อของตัวเอง  ตอนกรอง/หน้า 2+ เอามารวมกันจะอ่านผลลัพธ์ง่ายกว่า
+          (ลำดับ pro-มาก่อน มาจาก ORDER BY ของ API อยู่แล้ว) */}
+      {grouped && proPosts.length > 0 ? (
+        <>
+          <h3 class="group">
+            แนะนำ
+            <span>ผู้ให้บริการที่ยืนยันตัวตนแล้ว</span>
+          </h3>
+          <ul class="grid">
+            {proPosts.map((post) => <PostCard post={post} />)}
+          </ul>
+
+          {freePosts.length > 0 && (
+            <>
+              <h3 class="group">
+                ประกาศล่าสุด
+                <span>เรียงตามเวลาที่อัปเดต</span>
+              </h3>
+              <ul class="grid">
+                {freePosts.map((post) => <PostCard post={post} />)}
+              </ul>
+            </>
+          )}
+        </>
+      ) : (
+        posts.length > 0 && (
+          <>
+            {/* การ์ดใช้ h4 ตัวหัวข้อกลุ่มใช้ h3 — เคสนี้ไม่มีหัวข้อกลุ่ม ต้องใส่ h3
+                ที่มองไม่เห็นกันลำดับ heading ข้ามขั้น (h2 -> h4) ตอนอ่านด้วย screen reader */}
+            <h3 class="sr-only">รายการประกาศ</h3>
+            <ul class="grid">
+              {posts.map((post) => <PostCard post={post} />)}
+            </ul>
+          </>
+        )
+      )}
+
+      {/* แบ่งหน้าด้วยลิงก์จริง ไม่ใช่ infinite scroll — Googlebot ไต่ได้ และคนกด
+          back จากหน้าโพสแล้วยังอยู่หน้าเดิม  rel prev/next บอกความสัมพันธ์ให้ครอว์เลอร์ */}
+      {!apiDown && totalPages > 1 && (
+        <nav class="pager" aria-label="หน้าของผลการค้นหา">
+          {page > 1 ? (
+            <a class="btn btn-outline btn-sm" rel="prev" href={pageHref(page - 1)}>← ก่อนหน้า</a>
+          ) : (
+            <span class="btn btn-outline btn-sm" aria-disabled="true">← ก่อนหน้า</span>
+          )}
+
+          <p class="pager-at">หน้า {page} / {totalPages}</p>
+
+          {page < totalPages ? (
+            <a class="btn btn-outline btn-sm" rel="next" href={pageHref(page + 1)}>ถัดไป →</a>
+          ) : (
+            <span class="btn btn-outline btn-sm" aria-disabled="true">ถัดไป →</span>
+          )}
+        </nav>
+      )}
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════ วิธีใช้งาน -->
+    <section class="how container" id="how">
+      <p class="eyebrow">สำหรับผู้จ้างงาน</p>
+      <h2>จ้างงานได้ใน 3 ขั้น</h2>
+      <ol class="steps">
+        <li>
+          <span class="num">1</span>
+          <h3>ค้นหาบริการที่ต้องการ</h3>
+          <p>พิมพ์งานที่อยากจ้างในช่องค้นหา หรือเลือกจากหมวดหมู่บริการ</p>
+        </li>
+        <li>
+          <span class="num">2</span>
+          <h3>เทียบราคาและผลงาน</h3>
+          <p>ดูขอบเขตงานกับราคาเริ่มต้นของแต่ละคน ก่อนตัดสินใจติดต่อ</p>
+        </li>
+        <li>
+          <span class="num">3</span>
+          <h3>คุยกับเจ้าตัวโดยตรง</h3>
+          <p>ติดต่อทางเบอร์หรือ LINE ตกลงราคาและงานกันเอง เราไม่หักค่าคอม</p>
+        </li>
+      </ol>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════ ค่าบริการ -->
+    <section class="pricing" id="pricing">
+      <div class="container">
+        <div class="pricing-head">
+          <p class="eyebrow">สำหรับฟรีแลนซ์</p>
+          <h2>ลงประกาศฟรี จ่ายเมื่ออยากให้คนเห็นมากขึ้น</h2>
+          <p class="lede">
+            บัญชีฟรีใช้ได้ตลอดไป ไม่มีวันหมดอายุ
+            อัปเกรดเป็น Pro เมื่อต้องการอยู่บนสุดของฟีดและเปิดเบอร์ให้ผู้จ้างโทรตรง
+          </p>
+        </div>
+
+        <div class="plans">
+          <article class="plan">
+            <h3>ฟรี</h3>
+            <p class="amount">0฿<span>ตลอดชีพ</span></p>
+            <ul>
+              <li>ลงประกาศได้ 1 ชิ้น</li>
+              <li>รูปภาพ 1 รูป</li>
+              <li>แสดงในฟีดปกติ</li>
+              <li class="off">ผู้จ้างติดต่อผ่านฟอร์ม (ซ่อนเบอร์)</li>
+              <li class="off">ไม่มีสถิติผู้เข้าชม</li>
+            </ul>
+            <a class="btn btn-outline" href="/post/new">เริ่มลงประกาศ</a>
+          </article>
+
+          <article class="plan featured">
+            <p class="ribbon">คุ้มที่สุด</p>
+            <h3>Pro</h3>
+            <p class="amount">300฿<span>/ 30 วัน</span></p>
+            <ul>
+              <li><strong>อยู่บนสุดของฟีดเสมอ</strong></li>
+              <li>ลงประกาศได้ 10 ชิ้น · รูป 10 รูป</li>
+              <li>แสดงเบอร์และ LINE ให้โทรตรง</li>
+              <li>กด Bump ดันประกาศขึ้นบนได้</li>
+              <li>ดูสถิติผู้เข้าชมและจำนวนคนติดต่อ</li>
+            </ul>
+            <a class="btn btn-primary" href="/post/new">อัปเกรดเป็น Pro</a>
+            <p class="fine">จ่ายครั้งเดียวต่อรอบ ไม่ต้องผูกบัตร ไม่ตัดเงินอัตโนมัติ</p>
+          </article>
+        </div>
+      </div>
+    </section>
   </main>
 </Base>
 
 <style>
-  :root { color-scheme: light dark; }
-  main { max-width: 62rem; margin: 0 auto; padding: 2rem 1rem; font-family: system-ui, sans-serif; }
-  h1 { font-size: 1.75rem; margin: 0 0 .25rem; }
-  header p { color: #666; margin: 0 0 2rem; }
-  .feed { list-style: none; padding: 0; display: grid; gap: 1rem;
-          grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
-  .card { border: 1px solid #e5e5e5; border-radius: .75rem; overflow: hidden; }
-  .card.pro { border-color: #111; }
-  .card a { display: block; padding: 1rem; color: inherit; text-decoration: none; }
-  .card h2 { font-size: 1rem; margin: 0 0 .5rem; }
-  .meta { font-size: .8125rem; color: #666; margin: 0 0 .5rem; }
-  .badge { display: inline-block; margin-left: .375rem; padding: .0625rem .375rem;
-           font-size: .6875rem; border-radius: 99px; background: #111; color: #fff; }
-  .price { font-weight: 600; margin: 0; }
-  .warn, .empty { padding: 1rem; background: #fff8e1; border-radius: .5rem; }
+  /* ── hero ─────────────────────────────────────────────────────────── */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+
+  /* แสงนวลๆ หลังหัวข้อ ให้หน้าไม่แบน แต่ไม่แย่งความสนใจจากช่องค้นหา */
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: -40% 0 auto;
+    height: 42rem;
+    background: radial-gradient(
+      55% 50% at 50% 50%,
+      color-mix(in srgb, var(--brand) 14%, transparent),
+      transparent 70%
+    );
+    pointer-events: none;
+  }
+
+  .hero-inner {
+    position: relative;
+    padding-block: var(--sp-8) var(--sp-7);
+    text-align: center;
+  }
+
+  h1 {
+    font-size: var(--step-4);
+    font-weight: 800;
+    letter-spacing: -0.025em;
+  }
+
+  h1 em {
+    color: var(--brand-text);
+    font-style: normal;
+  }
+
+  .lede {
+    max-width: 40rem;
+    margin: var(--sp-4) auto 0;
+    color: var(--text-muted);
+    font-size: var(--step-1);
+  }
+
+  /* ── ช่องค้นหา ─────────────────────────────────────────────────────── */
+  .search {
+    display: flex;
+    gap: var(--sp-2);
+    max-width: 34rem;
+    margin: var(--sp-6) auto 0;
+    padding: var(--sp-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-xl);
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-md);
+  }
+
+  .search:focus-within {
+    border-color: var(--brand-border);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .search input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.6875rem var(--sp-4);
+    border: 0;
+    border-radius: var(--r-md);
+    background: none;
+    outline: none;
+    /* type=search มาพร้อมกรอบมนกับปุ่มกากบาทของ Safari ต้องถอดทิ้งก่อน */
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  .search input::-webkit-search-decoration,
+  .search input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
+
+  .search input::placeholder {
+    color: var(--text-faint);
+  }
+
+  .search .btn {
+    border-radius: var(--r-md);
+  }
+
+  .perks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2) var(--sp-5);
+    justify-content: center;
+    margin: var(--sp-5) 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--text-muted);
+    font-size: var(--step--1);
+  }
+
+  .perks li {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+
+  .perks li::before {
+    content: '✓';
+    color: var(--brand-text);
+    font-weight: 700;
+  }
+
+  /* ── ฟีด ──────────────────────────────────────────────────────────── */
+  .feed-section {
+    /* scroll-margin ต่างหากจาก scroll-padding-top ที่ html เพราะ section นี้
+       เป็นเป้าของ /#feed จาก header ที่ sticky ทับอยู่ */
+    scroll-margin-top: var(--header-h);
+    padding-block: var(--sp-7);
+  }
+
+  .section-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    align-items: end;
+    justify-content: space-between;
+    margin-bottom: var(--sp-4);
+  }
+
+  .section-head h2 {
+    font-size: var(--step-2);
+  }
+
+  .sub {
+    margin-top: var(--sp-1);
+    color: var(--text-muted);
+    font-size: var(--step--1);
+  }
+
+  .filters {
+    display: flex;
+    gap: var(--sp-2);
+    margin-bottom: var(--sp-5);
+    padding-bottom: var(--sp-1);
+    /* จังหวัดเยอะแล้วต้องเลื่อนได้ ห้ามให้ตกบรรทัดจนดันฟีดลงไปใต้จอ */
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .active-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    margin: 0 0 var(--sp-4);
+    padding: 0;
+    list-style: none;
+  }
+
+  /* ชิปที่ถอดตัวกรองออกใช้สีแบรนด์ ให้ต่างจากชิปหมวดหมู่ที่เป็นตัวเลือก */
+  .active-filters .chip {
+    border-color: var(--brand-border);
+    background: var(--brand-soft);
+    color: var(--brand-text);
+    font-weight: 600;
+  }
+
+  .active-filters .chip span {
+    color: var(--text-faint);
+  }
+
+  .active-filters .chip:hover span {
+    color: var(--brand-text);
+  }
+
+  /* ── แบ่งหน้า ──────────────────────────────────────────────────────── */
+  .pager {
+    display: flex;
+    gap: var(--sp-3);
+    align-items: center;
+    justify-content: center;
+    margin-top: var(--sp-6);
+  }
+
+  .pager-at {
+    min-width: 7rem;
+    color: var(--text-muted);
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+  }
+
+  /* ปุ่มปลายทาง (หน้าแรก/หน้าสุดท้าย) เป็น span ไม่ใช่ a — ต้องดูกดไม่ได้จริงๆ */
+  .pager [aria-disabled='true'] {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1) var(--sp-3);
+    align-items: baseline;
+    margin-bottom: var(--sp-3);
+    font-size: var(--step-1);
+  }
+
+  .group:not(:first-of-type) {
+    margin-top: var(--sp-6);
+  }
+
+  .group span {
+    color: var(--text-faint);
+    font-size: var(--step--1);
+    font-weight: 400;
+  }
+
+  .grid {
+    display: grid;
+    gap: var(--sp-4);
+    padding: 0;
+    list-style: none;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 16.5rem), 1fr));
+  }
+
+  .notice {
+    padding: var(--sp-4);
+    border: 1px solid var(--warn-border);
+    border-radius: var(--r-md);
+    background: var(--warn-bg);
+    color: var(--warn-text);
+  }
+
+  .blank {
+    display: grid;
+    justify-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-7) var(--sp-4);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-lg);
+    background: var(--bg-subtle);
+    text-align: center;
+  }
+
+  .blank h3 {
+    font-size: var(--step-1);
+  }
+
+  .blank p {
+    max-width: 26rem;
+    color: var(--text-muted);
+    font-size: var(--step--1);
+  }
+
+  .blank .btn {
+    margin-top: var(--sp-3);
+  }
+
+  /* ── วิธีใช้งาน ────────────────────────────────────────────────────── */
+  .how {
+    scroll-margin-top: var(--header-h);
+    padding-block: var(--sp-7);
+    border-top: 1px solid var(--border);
+  }
+
+  .how > h2 {
+    font-size: var(--step-3);
+  }
+
+  .steps {
+    display: grid;
+    gap: var(--sp-5);
+    margin: var(--sp-6) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @media (min-width: 44rem) {
+    .steps {
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--sp-6);
+    }
+  }
+
+  .steps li {
+    display: grid;
+    gap: var(--sp-2);
+  }
+
+  .num {
+    display: grid;
+    place-items: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    margin-bottom: var(--sp-1);
+    border: 1px solid var(--brand-border);
+    border-radius: var(--r-pill);
+    background: var(--brand-soft);
+    color: var(--brand-text);
+    font-size: var(--step--1);
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .steps h3 {
+    font-size: var(--step-0);
+  }
+
+  .steps p {
+    color: var(--text-muted);
+    font-size: var(--step--1);
+  }
+
+  /* ── ค่าบริการ ─────────────────────────────────────────────────────── */
+  .pricing {
+    scroll-margin-top: var(--header-h);
+    padding-block: var(--sp-7);
+    border-top: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+
+  .pricing-head {
+    max-width: 42rem;
+  }
+
+  .pricing-head h2 {
+    font-size: var(--step-3);
+  }
+
+  .pricing-head .lede {
+    margin-inline: 0;
+    font-size: var(--step-0);
+  }
+
+  .plans {
+    display: grid;
+    gap: var(--sp-4);
+    margin-top: var(--sp-6);
+  }
+
+  @media (min-width: 44rem) {
+    .plans {
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--sp-5);
+    }
+  }
+
+  .plan {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-5);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg-elevated);
+  }
+
+  /* ใบ Pro ต้องดูเป็น "ของที่ควรเลือก" ไม่ใช่แค่ตัวเลือกที่แพงกว่า */
+  .plan.featured {
+    position: relative;
+    border-color: var(--brand);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .ribbon {
+    position: absolute;
+    top: calc(var(--sp-3) * -1);
+    inset-inline-start: var(--sp-5);
+    padding: 0.125rem 0.625rem;
+    border-radius: var(--r-pill);
+    background: var(--brand);
+    color: var(--on-brand);
+    font-size: 0.6875rem;
+    font-weight: 700;
+  }
+
+  .plan h3 {
+    font-size: var(--step-0);
+    color: var(--text-muted);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .amount {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    align-items: baseline;
+    font-size: var(--step-3);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+  }
+
+  .amount span {
+    color: var(--text-faint);
+    font-size: var(--step-0);
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+
+  .plan ul {
+    display: grid;
+    gap: var(--sp-2);
+    margin: var(--sp-1) 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: var(--step--1);
+  }
+
+  .plan li {
+    display: grid;
+    grid-template-columns: 1.125rem 1fr;
+    gap: var(--sp-2);
+    align-items: start;
+  }
+
+  .plan li::before {
+    content: '✓';
+    color: var(--brand-text);
+    font-weight: 700;
+  }
+
+  /* ข้อจำกัดของ free ต้องอ่านออกว่า "ไม่มี" ไม่ใช่แค่สีอ่อนลง — คนตาบอดสีต้องเห็นด้วย */
+  .plan li.off {
+    color: var(--text-faint);
+  }
+
+  .plan li.off::before {
+    content: '✕';
+    color: var(--text-faint);
+  }
+
+  .plan .btn {
+    margin-top: auto;
+  }
+
+  .fine {
+    color: var(--text-faint);
+    font-size: 0.75rem;
+    text-align: center;
+  }
 </style>

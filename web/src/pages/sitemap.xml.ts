@@ -1,25 +1,43 @@
 import type { APIRoute } from 'astro';
-import { apiGet, type Post } from '../lib/api';
+import { apiGet } from '../lib/api';
 
 export const prerender = false;
 
-// sitemap เอาเฉพาะโพสที่ status='active' เท่านั้น
-// โพสที่หมดอายุถูกถอดออกจากที่นี่ แต่ URL ยังเปิดอยู่พร้อม noindex (ดู services/[slug].astro)
+type SitemapPost = { slug: string; updated_at: string };
+
+// ใช้ /sitemap/posts ไม่ใช่ /posts เพราะ /posts cap limit ไว้ที่ 100
+// (ถ้าใช้เส้นนั้น sitemap จะมีแค่ 100 URL ตลอดกาล = ประกาศที่เหลือ Google ไม่เห็น)
+//
+// เอาเฉพาะโพส status='active' โพสที่หมดอายุถูกถอดออกจากที่นี่
+// แต่ URL ยังเปิดอยู่พร้อม noindex (ดู services/[slug].astro)
+const PAGE = 10_000;
+const MAX_URLS = 50_000; // ลิมิตของ sitemap protocol ต่อ 1 ไฟล์
+
+const esc = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 export const GET: APIRoute = async ({ site }) => {
   const origin = (site ?? new URL('http://localhost:4321')).origin;
 
-  let posts: Post[] = [];
+  const posts: SitemapPost[] = [];
   try {
-    posts = (await apiGet<{ data: Post[] }>('/api/v1/posts?limit=50000')).data;
+    for (let offset = 0; offset < MAX_URLS; offset += PAGE) {
+      const res = await apiGet<{ data: SitemapPost[] }>(
+        `/api/v1/sitemap/posts?limit=${PAGE}&offset=${offset}`,
+      );
+      posts.push(...res.data);
+      if (res.data.length < PAGE) break; // หน้าสุดท้ายแล้ว
+    }
   } catch {
-    posts = [];
+    // API ล่มก็ยังต้องคืน sitemap ที่ valid ไม่งั้น Google จะบันทึกว่า fetch error
   }
 
   const urls = [
     `<url><loc>${origin}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>`,
     ...posts.map(
       (p) =>
-        `<url><loc>${origin}/services/${encodeURIComponent(p.slug)}</loc>` +
+        `<url><loc>${esc(`${origin}/services/${encodeURI(p.slug)}`)}</loc>` +
+        `<lastmod>${p.updated_at.slice(0, 10)}</lastmod>` +
         `<changefreq>weekly</changefreq><priority>0.8</priority></url>`,
     ),
   ].join('\n');

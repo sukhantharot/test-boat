@@ -42,8 +42,21 @@ export type Post = {
   title: string;
   province: string | null;
   price_from_satang: number | null;
+  price_unit: string | null;
+  images: string[];
+  bumped_at: string;
   author: string;
   is_pro: boolean;
+  category_slug: string | null;
+  category_name: string | null;
+};
+
+export type Category = { id: number; slug: string; name: string };
+
+/** รูปแบบ response ของ endpoint ที่แบ่งหน้า — GET /api/v1/posts คืน meta มาด้วย */
+export type Paged<T> = {
+  data: T[];
+  meta: { total: number; limit: number; offset: number };
 };
 
 export const baht = (satang: number | null) =>

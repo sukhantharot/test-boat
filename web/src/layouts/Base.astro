@@ -1,4 +1,8 @@
 ---
+import SiteHeader from '../components/SiteHeader.astro';
+import SiteFooter from '../components/SiteFooter.astro';
+import '../styles/global.css';
+
 interface Props {
   title: string;
   description?: string;
@@ -23,7 +27,13 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url.origin).hr
     {/* follow ไม่ใช่ nofollow — ยังอยากให้ Google ไต่ไปหาโพสที่ยัง active อยู่ */}
     {noindex && <meta name="robots" content="noindex,follow" />}
 
+    {/* สีแถบ browser บนมือถือ ต้องแยก 2 ค่าให้ตรงกับ --bg ของแต่ละโหมด
+        ไม่งั้นโหมดมืดจะเห็นแถบขาวคาดหัวจอ */}
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0c0e13" media="(prefers-color-scheme: dark)" />
+
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Boat" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
@@ -35,6 +45,9 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url.origin).hr
     )}
   </head>
   <body>
+    <a class="skip-link" href="#content">ข้ามไปที่เนื้อหา</a>
+    <SiteHeader />
     <slot />
+    <SiteFooter />
   </body>
 </html>

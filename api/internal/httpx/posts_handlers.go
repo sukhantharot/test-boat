@@ -11,6 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+
+	slugpkg "boat/api/internal/slug"
 )
 
 // ลิมิตตามแพ็กเกจ — free tier ถาวรแต่โพสได้ชิ้นเดียว
@@ -207,6 +209,7 @@ func (s *Server) sitemapPosts(w http.ResponseWriter, r *http.Request) {
 		SELECT p.slug, p.updated_at
 		FROM posts p JOIN users u ON u.id = p.user_id
 		WHERE p.status = 'active' AND u.status = 'active'
+		  AND NOT p.is_demo          -- ประกาศตัวอย่างไม่ต้องให้ Google เก็บ
 		ORDER BY p.id
 		LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
@@ -407,7 +410,7 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ต่อ id ท้าย slug -> unique แน่นอนและ URL คงที่ตลอดไปแม้แก้ชื่อทีหลัง
-	slug := slugify(in.Title) + "-" + strconv.FormatInt(id, 10)
+	slug := slugpkg.Make(in.Title) + "-" + strconv.FormatInt(id, 10)
 	if _, err := tx.Exec(r.Context(),
 		`UPDATE posts SET slug = $1 WHERE id = $2`, slug, id); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -73,35 +72,6 @@ func queryInt(r *http.Request, key string, def, min, max int) int {
 		return max
 	}
 	return v
-}
-
-// slug ที่เก็บอักษรไทยไว้ — ตั้งใจไม่ทับศัพท์เป็นอังกฤษ เพราะคำไทยใน URL
-// ช่วยเรื่อง SEO ภาษาไทยมากกว่า (เบราว์เซอร์ percent-encode ให้เอง แต่แสดงผลเป็นไทย)
-//
-// ⚠ ต้องรับ Mn/Mc ด้วย ไม่ใช่แค่ IsLetter: สระบน-ล่างและวรรณยุกต์ไทย
-// (ั ิ ี ุ ู ่ ้ ๊ ๋ ์) เป็น nonspacing mark ซึ่ง unicode.IsLetter คืน false
-// ถ้าตกไปจะได้ "ร-บออกแบบโลโก-" แทน "รับออกแบบโลโก้" — พัง SEO ทั้งเว็บ
-func slugify(s string) string {
-	var b strings.Builder
-	dash := false
-	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.In(r, unicode.Mn, unicode.Mc):
-			b.WriteRune(r)
-			dash = false
-		case !dash && b.Len() > 0:
-			b.WriteRune('-')
-			dash = true
-		}
-	}
-	out := strings.Trim(b.String(), "-")
-	if rs := []rune(out); len(rs) > 60 {
-		out = strings.Trim(string(rs[:60]), "-")
-	}
-	if out == "" {
-		out = "post"
-	}
-	return out
 }
 
 // คีย์นับวิวแบบไม่เก็บ IP ตรงๆ — พอกันคนกด refresh รัวจนตัวเลขเฟ้อ

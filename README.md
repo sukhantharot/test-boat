@@ -101,7 +101,11 @@ railway add --database postgres
 DATABASE_URL = ${{Postgres.DATABASE_URL}}
 APP_ENV      = production
 WEB_ORIGIN   = https://${{web.RAILWAY_PUBLIC_DOMAIN}}
+PORT         = 8080
 ```
+
+> ตั้ง `PORT = 8080` บน `api` ให้ชัดเจน — private network ต้องระบุพอร์ตเสมอ
+> (`api.railway.internal:8080`) ถ้าปล่อยให้ Railway สุ่มพอร์ตให้ ฝั่ง `web` จะเดาไม่ถูก
 
 **web**
 ```
@@ -135,8 +139,20 @@ railway logs
 `*.railway.internal` เข้าถึงได้เฉพาะจากใน Railway — เอาไปใส่ในโค้ดฝั่ง browser จะ fetch ไม่ติด
 [web/src/lib/api.ts](web/src/lib/api.ts) แยกไว้แล้ว: SSR ใช้ private (ไม่คิด egress), browser ใช้ public
 
-**3. `PUBLIC_*` ของ Astro ถูก inline ตอน build ไม่ใช่ตอน run**
-แก้ค่าใน dashboard เฉยๆ ไม่มีผล ต้อง **redeploy**
+**3. env ของ Astro มี 2 แบบ อย่าสลับกัน**
+
+| ตัวแปร | อ่านยังไง | เมื่อไหร่ |
+|---|---|---|
+| `PUBLIC_*` | `import.meta.env.PUBLIC_X` | **inline ตอน build** — แก้ใน dashboard เฉยๆ ไม่มีผล ต้อง redeploy และต้องส่งเป็น `ARG` เข้า Dockerfile ด้วย |
+| ตัวอื่น (เช่น `INTERNAL_API_URL`) | **`process.env.X`** | อ่านตอน runtime |
+
+ถ้าเผลอใช้ `import.meta.env.INTERNAL_API_URL` มันจะกลายเป็น `undefined` ตอน build
+แล้วตกไป fallback `localhost:8080` เงียบๆ → หน้าเว็บขึ้น "ระบบขัดข้องชั่วคราว"
+เช็คได้ที่ `/debug/api` ว่า SSR กำลังยิงไป URL ไหน
+
+**3b. เช็คว่าต่อ API ติดไหม**
+เปิด `https://<web-domain>/debug/api` จะบอก URL ที่ SSR ใช้ + error จริง
+พอ deploy นิ่งแล้วลบ [web/src/pages/debug/api.ts](web/src/pages/debug/api.ts) ทิ้งได้
 
 **4. `cronSchedule` เป็น UTC เสมอ**
 `0 18 * * *` = ตี 1 ของวันถัดไปตามเวลาไทย

@@ -8,15 +8,31 @@
 //
 // ผิดพลาดตรงนี้บ่อยมาก: เอา .railway.internal ไปใส่ในโค้ดฝั่ง browser แล้วงงว่าทำไม fetch fail
 
-const INTERNAL = import.meta.env.INTERNAL_API_URL || 'http://localhost:8080';
+// INTERNAL_API_URL ไม่ใช่ PUBLIC_ จึงอ่านตอน runtime ได้ ต้องอ่านจาก process.env
+// (import.meta.env จะถูก inline ตอน build ซึ่งตอนนั้นค่ายังไม่มี)
+export const INTERNAL_API_URL =
+  process.env.INTERNAL_API_URL || import.meta.env.INTERNAL_API_URL || 'http://localhost:8080';
+
 export const PUBLIC_API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8080';
 
 export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${INTERNAL}${path}`, {
-    ...init,
-    headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
-  });
-  if (!res.ok) throw new Error(`API ${path} -> ${res.status}`);
+  const url = `${INTERNAL_API_URL}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(10_000),
+      headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
+    });
+  } catch (e) {
+    // โผล่ใน Railway logs ของ service `web` -> บอกได้เลยว่าไปเรียก URL ไหนแล้วพังเพราะอะไร
+    console.error(`[api] fetch failed ${url}:`, (e as Error).message);
+    throw e;
+  }
+  if (!res.ok) {
+    console.error(`[api] ${url} -> HTTP ${res.status}`);
+    throw new Error(`API ${path} -> ${res.status}`);
+  }
   return res.json() as Promise<T>;
 }
 

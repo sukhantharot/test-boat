@@ -1,0 +1,21 @@
+# Postgres สำหรับ dev บนเครื่องตัวเอง — Railway จะมี Postgres ของตัวเองอยู่แล้ว
+# ใช้ image เดียวกับที่ Railway ให้ (Postgres 16) จะได้ไม่เจอ surprise ตอน deploy
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: boat
+      POSTGRES_PASSWORD: boat
+      POSTGRES_DB: boat
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U boat -d boat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

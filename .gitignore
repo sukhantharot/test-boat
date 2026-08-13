@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+
+# go
+/api/api
+/api/migrate
+/api/cron
+*.exe
+
+# astro / node
+node_modules/
+/web/dist/
+/web/.astro/
+
+.DS_Store

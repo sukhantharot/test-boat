@@ -1,0 +1,40 @@
+---
+interface Props {
+  title: string;
+  description?: string;
+  /** true เมื่อโพสหมดอายุ/ถูกซ่อน — บอก Google ว่าอย่า index หน้านี้ แต่ยังตาม link ต่อได้ */
+  noindex?: boolean;
+  /** JSON-LD ที่จะฝังลงหน้า (schema.org) */
+  jsonLd?: Record<string, unknown>;
+}
+
+const { title, description = '', noindex = false, jsonLd } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url.origin).href;
+---
+
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    {description && <meta name="description" content={description} />}
+    <link rel="canonical" href={canonical} />
+
+    {/* follow ไม่ใช่ nofollow — ยังอยากให้ Google ไต่ไปหาโพสที่ยัง active อยู่ */}
+    {noindex && <meta name="robots" content="noindex,follow" />}
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:locale" content="th_TH" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    {jsonLd && (
+      <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+    )}
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

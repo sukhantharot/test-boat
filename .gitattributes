@@ -1,0 +1,17 @@
+# บังคับ LF ในทุกไฟล์ที่จะถูกรันบน Linux (Railway build)
+# ถ้าปล่อยให้เป็น CRLF จะเจอ error แปลกๆ ตอน docker build
+* text=auto eol=lf
+
+*.go        text eol=lf
+*.sql       text eol=lf
+*.ts        text eol=lf
+*.astro     text eol=lf
+*.mjs       text eol=lf
+*.json      text eol=lf
+*.yml       text eol=lf
+Dockerfile  text eol=lf
+
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
